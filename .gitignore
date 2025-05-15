@@ -1,3 +1,15 @@
+data/
+frames/
+key
+output.json
+outputss.json
+test_frame.py
+test.py
+testopencv.py
+demo.py
+
+
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
