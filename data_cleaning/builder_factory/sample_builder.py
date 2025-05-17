@@ -30,12 +30,10 @@ class SampleBuilder:
         }
 
     def with_basic_info(self, sample_id: str, video_path: str) -> "SampleBuilder":
-        """设置基本信息（修正视频路径）"""
-        # 拼接正确的视频路径（添加memoconv_convs目录）
-        correct_video_path = f"data/MECR_CCAC2025/memoconv_convs/{video_path}"
+        """设置基本信息（使用原始视频路径）"""
         self.sample.update({
             "id": sample_id, 
-            "video_path": correct_video_path,  # 使用修正后的路径
+            "video_path": video_path,  # 直接使用原始路径
             "rationale": {}
         })
         return self
@@ -49,9 +47,9 @@ class SampleBuilder:
         self, target_utt_ids: List[List[str]], sampler: FrameSamplerStrategy
     ) -> "SampleBuilder":
         """生成关键帧（添加ID格式转换逻辑）"""
-        # 步骤1：从video_path提取视频编号（如anjia/anjia_11.mp4 → 11）
+        # 步骤1：从video_path提取视频名称（如anjia/anjia_11.mp4 → anjia_11）
         video_filename = self.sample["video_path"].split("/")[-1]  # "anjia_11.mp4"
-        video_number = video_filename.split("_")[-1].split(".")[0]  # "11"
+        video_name = video_filename.split(".")[0]  # "anjia_11"
 
         # 步骤2：转换target_utt_ids中的ID格式（anjia_sample35_1 → anjia_11_1）
         converted_utt_ids = []
@@ -61,7 +59,7 @@ class SampleBuilder:
                 # 提取原始ID的后缀数字（如anjia_sample35_1 → "1"）
                 suffix_num = utt_id.split("_")[-1]
                 # 生成实际utts中的ID（anjia_11_1）
-                converted_id = f"anjia_{video_number}_{suffix_num}"
+                converted_id = f"{video_name}_{suffix_num}"
                 converted_pair.append(converted_id)
             converted_utt_ids.append(converted_pair)
 
@@ -79,9 +77,9 @@ class SampleBuilder:
         self, target_utt_ids: List[List[str]], target_emos: List[List[str]]
     ) -> "SampleBuilder":
         """解析情感变化区间（添加ID格式转换逻辑）"""
-        # 步骤1：从video_path提取视频编号（如anjia/anjia_1.mp4 → 1）
+        # 步骤1：从video_path提取视频名（如anjia/anjia_1.mp4 → anjia_1）
         video_filename = self.sample["video_path"].split("/")[-1]  # "anjia_1.mp4"
-        video_number = video_filename.split("_")[-1].split(".")[0]  # "1"
+        video_number = video_filename.split("_")[-1].split(".")[0]  # "anjia_1"
 
         # 步骤2：转换target_utt_ids中的ID格式（anjia_sample1_1 → anjia_1_1）
         converted_utt_ids = []
@@ -131,7 +129,7 @@ class SampleBuilder:
                 "start_idx": first_interval["start_idx"],
                 "end_idx": last_interval["end_idx"],
                 "from_emotion": first_interval["from_emotion"],
-                "to_emotion": last_interval["from_emotion"]  # 根据用户需求，取最后区间的from_emotion作为to_emotion
+                "to_emotion": last_interval["to_emotion"]  # 修正这里：使用to_emotion而不是from_emotion
             }
         else:
             merged_emo_change = {}  # 无变化区间时返回空对象

@@ -3,6 +3,8 @@ from typing import List, Dict, Any
 from utils.video_processor import VideoProcessor
 import os
 import cv2
+import logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
 class FrameSamplerStrategy(ABC):
@@ -40,7 +42,7 @@ class ContextWindowSampler(FrameSamplerStrategy):
         # 定位目标utterance索引（添加日志辅助调试）
         u_change_idx = next((i for i, u in enumerate(utterances) if u["id"] == u_change_id), -1)
         if u_change_idx == -1:
-            print(f"警告：未找到情感变化utterance ID: {u_change_id}")  # 添加调试日志
+            logging.warning(f"警告：未找到utterance {u_change_id} 在utterances列表中的索引")  # 添加日志提示
             return []
             
         # 计算上下文窗口范围（N=3）
@@ -49,48 +51,68 @@ class ContextWindowSampler(FrameSamplerStrategy):
         
         # 实际采样逻辑（修正视频路径拼接）
         frames = []
+        #获取当前项目的根目录
+        current_file_path = os.path.abspath(__file__)
+        workspace_root = os.path.abspath(os.path.join(os.path.dirname(current_file_path),"..",".."))
+        # logging.info("当前项目的根目录为：{}".format(workspace_root))
         with VideoProcessor() as vp:
-            # 使用系统提供的workspace_folder拼接正确路径（避免重复目录）
-            workspace_folder = "/Users/cjh/Desktop/file/AI/MECR_CCAC2025"
-            full_video_path = os.path.join(workspace_folder,  video_path)
+            #获取视频文件path
+            vedio_data_path=os.path.join(workspace_root, "data/MECR_CCAC2025/memoconv_convs")
+            # logging.info(f"视频文件路径为：{vedio_data_path}")
+            full_video_path = os.path.join(vedio_data_path,  video_path)
+            # logging.info(f"完整视频路径为：{full_video_path}")
             if not vp.cap.open(full_video_path):
-                print(f"错误：无法打开视频文件 {full_video_path}")  # 添加错误日志
+                logging.error(f"无法打开视频文件: {full_video_path}")
                 return []
             
             for utt in utterances[start_idx:end_idx]:
-                duration = utt["end_sec"] - utt["start_sec"]
+                start_sec = utt["start_sec"]
+                end_sec = utt["end_sec"]
+                duration = end_sec - start_sec
+                
+                # 处理持续时间为0的情况
                 if duration <= 0:
-                    print(f"警告：utterance {utt['id']} 持续时间无效（{utt['start_sec']}-{utt['end_sec']}）")
+                    utt_id = utt["id"]
+                    start_frame = self._convert_sec_to_frame(start_sec)
+                    logging.warning(f"强制采集零持续时间帧: {utt_id}_frame_{start_frame}")
+                    frames.append(f"{utt_id}_frame_{start_frame}.jpg")
                     continue
-                    
+                
+                # 添加视频帧数边界检查
+                total_frames = int(vp.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                
                 # 每utterance均匀采样2帧（修正时间间隔计算）
-                sample_times = [utt["start_sec"] + duration * (i+1)/(self.frames_per_utt + 1) for i in range(self.frames_per_utt)]
+                # 采样逻辑（添加越界修正）
+                sample_times = [start_sec + duration * (i+1)/(self.frames_per_utt + 1) for i in range(self.frames_per_utt)]
+                valid_frames = []
                 
                 for t in sample_times:
-                    frame_pos = int(t * 25)  # 25fps转换
-                    vp.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_pos)
+                    frame_num = self._convert_sec_to_frame(t)
+                    # 越界修正逻辑
+                    if frame_num >= total_frames:
+                        adjusted_frame = total_frames - 1  # 最后一帧
+                        logging.warning(f"调整越界帧 {frame_num} → {adjusted_frame}")
+                        valid_frames.append(adjusted_frame)
+                    else:
+                        valid_frames.append(frame_num)
+                
+                # 补足缺失帧
+                while len(valid_frames) < self.frames_per_utt:
+                    last_valid = valid_frames[-1] if valid_frames else (total_frames - 1)
+                    new_frame = max(0, last_valid - 1)  # 向前取帧
+                    valid_frames.append(new_frame)
+                    logging.warning(f"补足缺失帧：{new_frame}")
+
+                for frame_num in valid_frames:
+                    vp.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
                     ret, _ = vp.cap.read()
                     if ret:
-                        frames.append(f"{utt['id']}_frame_{frame_pos}.jpg")
+                        frames.append(f"{utt['id']}_frame_{frame_num}.jpg")
                     else:
-                        print(f"警告：utterance {utt['id']} 帧 {frame_pos} 读取失败")  # 添加帧读取失败日志
+                        logging.warning(f"警告：无法读取帧{utt['id']}_frame_{frame_pos}.jpg {frame_pos}")
         
         return frames
 
-    def _extract_frames(self, video_path: str, duration: float, fps: float) -> list:
-        """实际帧提取逻辑"""
-        frames = []
-        total_frames = int(duration * fps)
-        
-        with VideoProcessor() as vp:
-            vp.cap.open(video_path)
-            for frame_idx in range(0, total_frames, self.sample_interval):
-                vp.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
-                ret, frame = vp.cap.read()
-                if ret:
-                    frames.append({
-                        "frame_index": frame_idx,
-                        "timestamp": frame_idx / fps,
-                        "frame_data": cv2.imencode('.jpg', frame)[1].tobytes().hex()
-                    })
-        return frames
+    def _convert_sec_to_frame(self, seconds: float) -> int:
+        """秒转帧号（基于25fps）"""
+        return int(seconds * 25)
