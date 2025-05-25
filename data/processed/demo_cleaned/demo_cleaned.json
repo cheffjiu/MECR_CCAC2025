@@ -1,0 +1,293 @@
+[
+  {
+    "sample_id": "anjia_sample1",
+    "video_path": "anjia/anjia_1.mp4",
+    "utterances": [
+      {
+        "utt_id": "anjia_1_1",
+        "text": "你先把衣服换了，然后去这个地址。",
+        "speaker": "A",
+        "start_sec": 0.04,
+        "end_sec": 2.76,
+        "emotion": [
+          "Neutral"
+        ]
+      },
+      {
+        "utt_id": "anjia_1_2",
+        "text": "一会儿会有装修公司的人过去，你去监工，看看有什么可以帮忙的。",
+        "speaker": "A",
+        "start_sec": 2.76,
+        "end_sec": 7.8,
+        "emotion": [
+          "Neutral"
+        ]
+      },
+      {
+        "utt_id": "anjia_1_3",
+        "text": "这个活也派我干呀？",
+        "speaker": "B",
+        "start_sec": 7.8,
+        "end_sec": 12.48,
+        "emotion": [
+          "Sad"
+        ]
+      },
+      {
+        "utt_id": "anjia_1_4",
+        "text": "装修我不懂。",
+        "speaker": "B",
+        "start_sec": 12.48,
+        "end_sec": 14.12,
+        "emotion": [
+          "Sad"
+        ]
+      },
+      {
+        "utt_id": "anjia_1_5",
+        "text": "你发了两天传单了，有没有意向客户啊？要到人家电话没有？",
+        "speaker": "A",
+        "start_sec": 14.12,
+        "end_sec": 21.92,
+        "emotion": [
+          "Anger"
+        ]
+      }
+    ],
+    "key_frames": [
+      "anjia_1_3_frame_234.jpg",
+      "anjia_1_3_frame_273.jpg",
+      "anjia_1_4_frame_325.jpg",
+      "anjia_1_4_frame_339.jpg",
+      "anjia_1_5_frame_418.jpg",
+      "anjia_1_5_frame_483.jpg"
+    ],
+    "emo_change": {
+      "start_idx": 0,
+      "end_idx": 4,
+      "from_emotion": [
+        "Neutral"
+      ],
+      "to_emotion": [
+        "Anger"
+      ]
+    },
+    "rationale": {
+      "stimulus": {
+        "textual": "B表示自己不懂装修",
+        "visual": null
+      },
+      "appraisal": "A认为B工作态度不好，不但没有为公司带来意向客户，还不想去监工装修",
+      "response": "A感到愤怒"
+    }
+  },
+  {
+    "sample_id": "anjia_sample2",
+    "video_path": "anjia/anjia_1.mp4",
+    "utterances": [
+      {
+        "utt_id": "anjia_1_1",
+        "text": "你先把衣服换了，然后去这个地址。",
+        "speaker": "A",
+        "start_sec": 0.04,
+        "end_sec": 2.76,
+        "emotion": [
+          "Neutral"
+        ]
+      },
+      {
+        "utt_id": "anjia_1_2",
+        "text": "一会儿会有装修公司的人过去，你去监工，看看有什么可以帮忙的。",
+        "speaker": "A",
+        "start_sec": 2.76,
+        "end_sec": 7.8,
+        "emotion": [
+          "Neutral"
+        ]
+      },
+      {
+        "utt_id": "anjia_1_3",
+        "text": "这个活也派我干呀？",
+        "speaker": "B",
+        "start_sec": 7.8,
+        "end_sec": 12.48,
+        "emotion": [
+          "Sad"
+        ]
+      },
+      {
+        "utt_id": "anjia_1_4",
+        "text": "装修我不懂。",
+        "speaker": "B",
+        "start_sec": 12.48,
+        "end_sec": 14.12,
+        "emotion": [
+          "Sad"
+        ]
+      },
+      {
+        "utt_id": "anjia_1_5",
+        "text": "你发了两天传单了，有没有意向客户啊？要到人家电话没有？",
+        "speaker": "A",
+        "start_sec": 14.12,
+        "end_sec": 21.92,
+        "emotion": [
+          "Anger"
+        ]
+      },
+      {
+        "utt_id": "anjia_1_6",
+        "text": "你不就光让我发传单吗？没让我要电话呀!",
+        "speaker": "B",
+        "start_sec": 21.92,
+        "end_sec": 24.88,
+        "emotion": [
+          "Sad",
+          "Anger"
+        ]
+      }
+    ],
+    "key_frames": [
+      "anjia_1_4_frame_325.jpg",
+      "anjia_1_4_frame_339.jpg",
+      "anjia_1_5_frame_418.jpg",
+      "anjia_1_5_frame_483.jpg",
+      "anjia_1_6_frame_572.jpg",
+      "anjia_1_6_frame_597.jpg"
+    ],
+    "emo_change": {
+      "start_idx": 2,
+      "end_idx": 5,
+      "from_emotion": [
+        "Sad"
+      ],
+      "to_emotion": [
+        "Sad",
+        "Anger"
+      ]
+    },
+    "rationale": {
+      "stimulus": {
+        "textual": "A对B没能积累意向客户表示不满",
+        "visual": "A双手环抱胸前瞪着B"
+      },
+      "appraisal": "B认为A只让自己去发传单，没有让自己去获取客户电话",
+      "response": "B感到委屈并且有点生气"
+    }
+  },
+  {
+    "sample_id": "anjia_sample44",
+    "video_path": "anjia/anjia_12.mp4",
+    "utterances": [
+      {
+        "utt_id": "anjia_12_1",
+        "text": "七十一年了，我们老耿家，给他们家看房看了七十一年了。",
+        "speaker": "A",
+        "start_sec": 0.04,
+        "end_sec": 5.72,
+        "emotion": [
+          "Sad"
+        ]
+      },
+      {
+        "utt_id": "anjia_12_2",
+        "text": "终于把他们盼回来了，不说感激的话，反而说我是骗子，哎呀。",
+        "speaker": "A",
+        "start_sec": 5.72,
+        "end_sec": 12.68,
+        "emotion": [
+          "Sad"
+        ]
+      },
+      {
+        "utt_id": "anjia_12_3",
+        "text": "我们要是想讹他，还会等到今天？",
+        "speaker": "B",
+        "start_sec": 12.68,
+        "end_sec": 20.68,
+        "emotion": [
+          "Sad"
+        ]
+      },
+      {
+        "utt_id": "anjia_12_4",
+        "text": "他居然不承认这个赠予书是真的，说是假的。",
+        "speaker": "A",
+        "start_sec": 20.68,
+        "end_sec": 25.28,
+        "emotion": [
+          "Anger"
+        ]
+      },
+      {
+        "utt_id": "anjia_12_5",
+        "text": "我老耿要是能作假的话，我把整个向公馆，都说成是我的！",
+        "speaker": "A",
+        "start_sec": 25.28,
+        "end_sec": 31.36,
+        "emotion": [
+          "Sad",
+          "Anger"
+        ]
+      },
+      {
+        "utt_id": "anjia_12_6",
+        "text": "隔了三代了，他能怎么着！",
+        "speaker": "A",
+        "start_sec": 31.36,
+        "end_sec": 34.4,
+        "emotion": [
+          "Sad",
+          "Anger"
+        ]
+      },
+      {
+        "utt_id": "anjia_12_7",
+        "text": "就是嘛，我们要把钱看得那么重，我早把这些空房子我都租出去了，我能收多少钱啊？",
+        "speaker": "B",
+        "start_sec": 34.4,
+        "end_sec": 42.2,
+        "emotion": [
+          "Anger"
+        ]
+      },
+      {
+        "utt_id": "anjia_12_8",
+        "text": "我爷爷当年，为了保护这个向公馆，被造反派，打折过腰。",
+        "speaker": "A",
+        "start_sec": 42.2,
+        "end_sec": 52.52,
+        "emotion": [
+          "Sad"
+        ]
+      }
+    ],
+    "key_frames": [
+      "anjia_12_6_frame_809.jpg",
+      "anjia_12_6_frame_834.jpg",
+      "anjia_12_7_frame_925.jpg",
+      "anjia_12_7_frame_990.jpg",
+      "anjia_12_8_frame_1141.jpg",
+      "anjia_12_8_frame_1227.jpg"
+    ],
+    "emo_change": {
+      "start_idx": 4,
+      "end_idx": 7,
+      "from_emotion": [
+        "Sad",
+        "Anger"
+      ],
+      "to_emotion": [
+        "Sad"
+      ]
+    },
+    "rationale": {
+      "stimulus": {
+        "textual": "A想到爷爷为保护公馆被打折过腰",
+        "visual": null
+      },
+      "appraisal": "A对于爷爷为保护公馆付出巨大牺牲感到痛心",
+      "response": "A十分的难过"
+    }
+  }
+]
