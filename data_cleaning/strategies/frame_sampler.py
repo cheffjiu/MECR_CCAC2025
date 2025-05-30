@@ -116,3 +116,71 @@ class ContextWindowSampler(FrameSamplerStrategy):
     def _convert_sec_to_frame(self, seconds: float) -> int:
         """秒转帧号（基于25fps）"""
         return int(seconds * 25)
+
+class EveryUtteranceSampler(FrameSamplerStrategy):
+    """为每个utterance采样3帧的策略"""
+
+    def __init__(self, frames_per_utt: int = 3):
+        self.frames_per_utt = frames_per_utt
+
+    def sample(self, utterances: List[Dict], target_utt_ids: List[List[str]], video_path: str, video_processor: VideoProcessor) -> List[str]:
+        frames = []
+        # 获取当前项目的根目录
+        current_file_path = os.path.abspath(__file__)
+        workspace_root = os.path.abspath(os.path.join(os.path.dirname(current_file_path), "..", ".."))
+        # 获取视频文件path
+        vedio_data_path = os.path.join(workspace_root, "data/MECR_CCAC2025/memoconv_convs")
+        full_video_path = os.path.join(vedio_data_path, video_path)
+        if not video_processor.cap.open(full_video_path):
+            logging.error(f"无法打开视频文件: {full_video_path}")
+            return []
+
+        total_frames = int(video_processor.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+        for utt in utterances:
+            start_sec = utt["start_sec"]
+            end_sec = utt["end_sec"]
+            duration = end_sec - start_sec
+
+            # 处理持续时间为0的情况
+            if duration <= 0:
+                utt_id = utt["id"]
+                start_frame = self._convert_sec_to_frame(start_sec)
+                logging.warning(f"强制采集零持续时间帧: {utt_id}_frame_{start_frame}")
+                frames.append(f"{utt_id}_frame_{start_frame}.jpg")
+                continue
+
+            # 每utterance均匀采样3帧
+            sample_times = [start_sec + duration * (i + 1) / (self.frames_per_utt + 1) for i in range(self.frames_per_utt)]
+            valid_frames = []
+
+            for t in sample_times:
+                frame_num = self._convert_sec_to_frame(t)
+                # 越界修正逻辑
+                if frame_num >= total_frames:
+                    adjusted_frame = total_frames - 1  # 最后一帧
+                    logging.warning(f"调整越界帧 {frame_num} → {adjusted_frame}")
+                    valid_frames.append(adjusted_frame)
+                else:
+                    valid_frames.append(frame_num)
+
+            # 补足缺失帧
+            while len(valid_frames) < self.frames_per_utt:
+                last_valid = valid_frames[-1] if valid_frames else (total_frames - 1)
+                new_frame = max(0, last_valid - 1)  # 向前取帧
+                valid_frames.append(new_frame)
+                logging.warning(f"补足缺失帧：{new_frame}")
+
+            for frame_num in valid_frames:
+                video_processor.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
+                ret, _ = video_processor.cap.read()
+                if ret:
+                    frames.append(f"{utt['id']}_frame_{frame_num}.jpg")
+                else:
+                    logging.warning(f"警告：无法读取帧{utt['id']}_frame_{frame_num}.jpg")
+
+        return frames
+
+    def _convert_sec_to_frame(self, seconds: float) -> int:
+        """秒转帧号（基于25fps）"""
+        return int(seconds * 25)

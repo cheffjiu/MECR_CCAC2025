@@ -1,10 +1,16 @@
 data/MECR_CCAC2025
 data/processed/demo_cleaned/keyframes
 data/processed/val_cleaned/keyframes
+data/processed/train_cleaned/keyframes
 test_one_step.py
+debug.py
+tmp
+main.py
+main
+test.py
 .DS_Store
 .pytest_cache
-
+.vscode
 
 
 

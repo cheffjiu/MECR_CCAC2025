@@ -1,7 +1,7 @@
 import json
 import torch
 import os
-from transformers import BertTokenizer, BertModel
+from transformers import AutoTokenizer, AutoModel
 from accelerate import Accelerator
 from tqdm import tqdm
 import logging
@@ -11,21 +11,17 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 accelerator = Accelerator()
-device = accelerator.device
+# device = accelerator.device
 
 # 设备优化配置
-device_type = (
-    "cuda"
-    if torch.cuda.is_available()
-    else "mps" if torch.backends.mps.is_available() else "cpu"
-)
+device_type = accelerator.device.type  # 直接使用accelerator实例的设备信息
 torch_device = torch.device(device_type)
 logging.info(f"Active device: {device_type.upper()}")
 
 # 加载模型和分词器（自动处理设备）
 with accelerator.main_process_first():
-    tokenizer = BertTokenizer.from_pretrained("bert-base-chinese")
-    model = BertModel.from_pretrained("bert-base-chinese").to(torch_device)
+    tokenizer = AutoTokenizer.from_pretrained("bert-base-chinese")
+    model = AutoModel.from_pretrained("bert-base-chinese").to(torch_device)
 
 # 模型配置优化
 model = accelerator.prepare(model)
@@ -36,9 +32,10 @@ for param in model.parameters():
 # 路径配置
 current_file_path = os.path.abspath(__file__)
 workspace_root = os.path.abspath(os.path.join(os.path.dirname(current_file_path), ".."))
+dataset_name="val"
 json_path = os.path.join(
 
-    workspace_root, "data/processed/demo_cleaned/demo_cleaned.json"
+    workspace_root, "data/processed/{dataset_name}_cleaned/{dataset_name}_cleaned.json"
 )
 
 # 处理数据
@@ -72,7 +69,7 @@ with torch.inference_mode(), accelerator.autocast(), torch.backends.cuda.sdp_ker
 
         # 特征保存（添加异步操作）
         feature_dir = os.path.join(
-            workspace_root, "data/feature/demo", sample_id, "text_feature"
+            workspace_root, "data/feature/{dataset_name}", sample_id, "text_feature"
         )
         os.makedirs(feature_dir, exist_ok=True)
 

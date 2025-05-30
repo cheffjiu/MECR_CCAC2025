@@ -17,10 +17,10 @@ class EmotionGraphEncoder(nn.Module):
         self.norm2 = GraphNorm(out_dim)
 
         self.mlp = nn.Sequential(
-            nn.Linear(out_dim, 2048),
+            nn.Linear(out_dim, 612),
             nn.GELU(),
-            nn.LayerNorm(2048),
-            nn.Linear(2048, 4096),
+            nn.LayerNorm(612),
+            nn.Linear(612, 1024),
         )
 
         self.device = device  # 存储设备信息
@@ -44,4 +44,5 @@ class EmotionGraphEncoder(nn.Module):
 
         h_change = h[super_idx]  # 使用移动到设备的 super_idx
         h_change = self.mlp(h_change)
+        print(f"h_change.shape: {h_change.shape}, h.shape: {h.shape}")
         return h_change, h

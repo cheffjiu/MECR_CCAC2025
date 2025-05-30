@@ -113,4 +113,6 @@ class CrossModalAttention(nn.Module):
             v_proj = layer['norm2'](v_proj + layer['dropout'](v_attn))
 
         fused_output = self.fusion_head(t_proj, v_proj)
+
+        print(f"fused_output.shape: {fused_output.shape}")
         return fused_output

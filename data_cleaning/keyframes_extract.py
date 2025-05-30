@@ -14,17 +14,26 @@ def extract_specific_frames(video_path, frame_info_list, output_dir):
         logging.error(f"错误：无法打开视频文件 {video_path}")
         return
 
+    # 获取视频总帧数用于校验
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    
     for frame_info in frame_info_list:
         frame_num = frame_info['frame_num']
         file_name = frame_info['file_name']
+        original_num = frame_num  # 保留原始帧号
+        
+        # 自动调整越界帧号为最后一帧
+        if frame_num >= total_frames:
+            frame_num = total_frames - 1
+            logging.warning(f"警告：原始帧号 {original_num} 越界，自动调整为 {frame_num}（视频总帧数：{total_frames}）")
+            
         cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
         ret, frame = cap.read()
         if ret:
             output_path = os.path.join(output_dir, file_name)
             cv2.imwrite(output_path, frame)
-            #logging.info(f"已保存帧 {frame_num} 到 {output_path}") 
         else:
-            logging.warning(f"警告：无法读取帧 {frame_num}")
+            logging.warning(f"警告：无法读取调整后的帧 {frame_num} (视频路径：{video_path})")
 
     cap.release()
 
@@ -33,13 +42,14 @@ if __name__ == "__main__":
     current_file_path = os.path.abspath(__file__)
     workspace_root = os.path.abspath(os.path.join(os.path.dirname(current_file_path),".."))
     # logging.info("当前项目的根目录为：{}".format(workspace_root))
+    dataset_name = "dd"  
     # 读取 JSON 文件
-    json_path = os.path.join(workspace_root, "data/processed/demo_cleaned/demo_cleaned.json")
+    json_path = os.path.join(workspace_root, f"data/processed/{dataset_name}_cleaned/{dataset_name}_cleaned.json")
     with open(json_path, 'r', encoding='utf-8') as f:
         data = json.load(f)
 
     # 关键帧输出目录
-    base_output_dir = os.path.join(workspace_root, "data/processed/demo_cleaned/keyframes")
+    base_output_dir = os.path.join(workspace_root, f"data/processed/{dataset_name}_cleaned/keyframes")  # 添加f-string
     os.makedirs(base_output_dir, exist_ok=True)
     
     # 遍历每个样本单独处理（添加主进度条）
@@ -72,5 +82,10 @@ if __name__ == "__main__":
             with tqdm(total=len(frame_info_list), desc=f"样本 {sample_id}") as sub_pbar:
                 extract_specific_frames(video_path, frame_info_list, output_dir_sample)
                 sub_pbar.update(len(frame_info_list))
-            
+             
             main_pbar.update(1)
+            
+            # 添加视频文件存在性检查
+            if not os.path.exists(video_path):
+                logging.error(f"视频文件不存在：{video_path}")
+                continue

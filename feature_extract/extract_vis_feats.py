@@ -23,69 +23,82 @@ for param in model.parameters():
 # 路径配置
 current_file_path = os.path.abspath(__file__)
 workspace_root = os.path.abspath(os.path.join(os.path.dirname(current_file_path), ".."))
-json_path = os.path.join(workspace_root, "data/processed/demo_cleaned/demo_cleaned.json")
+dataset_name = "val"  
+json_path = os.path.join(workspace_root, f"data/processed/{dataset_name}_cleaned/{dataset_name}_cleaned.json")
 
 # 内存优化上下文
 with accelerator.main_process_first(), torch.inference_mode(), accelerator.autocast():
     with open(json_path, 'r', encoding='utf-8') as f:
         data = json.load(f)
     
-    for sample in  tqdm(data,desc="提取视觉特征",total=len(data)):
+    for sample in tqdm(data, desc="提取视觉特征", total=len(data)):
         sample_id = sample['sample_id']
         utterances = sample['utterances']
         key_frames = sample['key_frames']
 
-        # 初始化张量（自动设备分配）
+        # 预计算utt_id到索引的映射
+        utt_id_to_index = {utt['utt_id']: i for i, utt in enumerate(utterances)}
+
+        # 初始化特征张量和帧计数器
         num_utterances = len(utterances)
         v_feats = torch.zeros((num_utterances, 512), device=accelerator.device)
-        vis_mask = torch.zeros(num_utterances, dtype=torch.uint8, device=accelerator.device)
+        frame_counts = torch.zeros(num_utterances, dtype=torch.int32, device=accelerator.device)
 
         for key_frame in key_frames:
+            # 从文件名解析utt_id
             utt_id = key_frame.split('_frame_')[0]
-            utt_index = next((i for i, utt in enumerate(utterances) if utt['utt_id'] == utt_id), None)
+            utt_index = utt_id_to_index.get(utt_id, None)
             
             if utt_index is not None:
                 try:
                     # 图像处理流水线
-                    image_path = os.path.join(workspace_root, 'data/processed/demo_cleaned/keyframes', sample_id, key_frame)
+                    image_path = os.path.join(
+                        workspace_root, 
+                        f'data/processed/{dataset_name}_cleaned/keyframes', 
+                        sample_id, 
+                        key_frame
+                    )
+                    
+                    # 检查文件是否存在
+                    if not os.path.exists(image_path):
+                        logging.warning(f"图像不存在: {image_path}")
+                        continue
+                    
                     image = Image.open(image_path)
                     
                     # 使用加速器处理输入
                     inputs = processor(images=image, return_tensors="pt")
-                    inputs = {k: v.to(accelerator.device) for k, v in inputs.items()}  # 显式数据移动
+                    inputs = {k: v.to(accelerator.device) for k, v in inputs.items()}
                     
                     # 特征提取
-                    # 在模型准备后添加设备类型定义
-                    device_type = accelerator.device.type  # 新增这行获取设备类型
+                    device_type = accelerator.device.type
                     
-                    # 修改混合精度上下文调用
                     with torch.amp.autocast(
-                        device_type=device_type,  # 使用已定义的变量
+                        device_type=device_type,
                         dtype=torch.float16,
                         enabled=accelerator.mixed_precision == 'fp16'
                     ):
                         image_features = model.get_image_features(**inputs)
                         image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True)
                     
-                    # 特征更新逻辑
+                    # 改进的特征更新逻辑 - 累积平均
                     current_feat = accelerator.gather(image_features).squeeze()
-                    if vis_mask[utt_index] == 1:
-                        v_feats[utt_index] = (v_feats[utt_index] + current_feat) / 2
-                    else:
-                        v_feats[utt_index] = current_feat
-                        vis_mask[utt_index] = 1
+                    frame_counts[utt_index] += 1
+                    count = frame_counts[utt_index].float()
+                    
+                    # 使用累积平均公式: new_avg = ((n-1)/n) * old_avg + (1/n) * new_value
+                    v_feats[utt_index] = ((count - 1) / count) * v_feats[utt_index] + (1 / count) * current_feat
                         
                 except Exception as e:
                     logging.error(f"处理 {image_path} 失败: {str(e)}")
                     continue
 
-        # 保存优化
-        video_features = torch.cat([vis_mask.unsqueeze(1), v_feats], dim=1)
-        video_feature_dir = os.path.join(workspace_root, "data/feature/demo", sample_id, "video_feature")
+        # 保存特征
+        video_feature_dir = os.path.join(workspace_root, f"data/feature/{dataset_name}", sample_id, "video_feature")
         os.makedirs(video_feature_dir, exist_ok=True)
         
-        # 使用单精度存储
-        torch.save(video_features.float(), os.path.join(video_feature_dir, f"{sample_id}_video.pt"))
+        # 保存特征张量，形状为 [num_utterances, 512]
+        #logging.info(f"保存特征张量: {v_feats.shape}")
+        torch.save(v_feats.float(), os.path.join(video_feature_dir, f"{sample_id}_video.pt"))
 
-logging.info("视觉特征提取完成")
-    
+logging.info("视觉特征提取完成")    

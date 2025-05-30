@@ -1,7 +1,7 @@
 from typing import List, Dict
 from parsers.json_parser import JsonDataParser
 from builder_factory.sample_factory import SampleFactory
-from strategies.frame_sampler import ContextWindowSampler
+from strategies.frame_sampler import ContextWindowSampler,EveryUtteranceSampler
 from utils.video_processor import VideoProcessor
 
 
@@ -10,7 +10,7 @@ class DataCleaningPipeline:
 
     def __init__(self):
         self.parser = JsonDataParser()
-        self.factory = SampleFactory(ContextWindowSampler())  # 默认采样策略
+        self.factory = SampleFactory(EveryUtteranceSampler())  # 默认采样策略
 
     def process_file(self, file_path: str) -> List[Dict]:
         """处理JSON文件并返回清洗后的数据"""

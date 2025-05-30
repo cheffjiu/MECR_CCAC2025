@@ -4,7 +4,7 @@ from torch_geometric.data import Batch
 import torch
 from torch.nn.utils.rnn import pad_sequence
 
-# 移除 tokenizer 参数，因为 collate_fn 不再执行分词编码
+
 def collate_to_graph_batch(batch_list, fusion_model, graph_builder, with_prompt=False):
     batch_t_feats = [sample['t_feats'].to(fusion_model.device) for sample in batch_list]
     batch_v_feats = [sample['v_feats'].to(fusion_model.device) for sample in batch_list]
