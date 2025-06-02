@@ -1,0 +1,47 @@
+classDiagram
+    class ERCDataset {
+        -List[dict] samples
+        -FeatureLoader feature_loader
+        -PromptConstructor prompt_constructor
+        -Retriever retriever
+        -LabelStrategy label_strategy
+        +__len__()
+        +__getitem__(idx)
+        +switch_mode(test_mode)
+    }
+
+    class FeatureLoader {
+        -str feature_dir
+        +load(sample_id) Tensor
+    }
+
+    class PromptConstructor {
+        +construct(sample) str
+    }
+
+    class Retriever {
+        -faiss.Index index
+        -dict id_to_index
+        -SentenceTransformer encoder
+        +build_index(samples)
+        +retrieve(query_id, k) List[dict]
+    }
+
+    class LabelStrategy {
+        +generate(sample) dict
+    }
+
+    class TrainLabelStrategy {
+        +generate(sample) dict
+    }
+
+    class TestLabelStrategy {
+        +generate(sample) dict
+    }
+
+    ERCDataset o--> FeatureLoader
+    ERCDataset o--> PromptConstructor
+    ERCDataset o--> Retriever
+    ERCDataset o--> LabelStrategy
+    LabelStrategy <|-- TrainLabelStrategy
+    LabelStrategy <|-- TestLabelStrategy

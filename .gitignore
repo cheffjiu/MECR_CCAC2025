@@ -6,7 +6,7 @@ test_one_step.py
 debug.py
 tmp
 main.py
-main
+
 test.py
 .DS_Store
 .pytest_cache
