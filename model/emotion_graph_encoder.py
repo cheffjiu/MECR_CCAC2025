@@ -5,7 +5,7 @@ from torch_geometric.nn import GATConv, GraphNorm
 
 
 class EmotionGraphEncoder(nn.Module):
-    def __init__(self, in_dim, hidden_dim=256, out_dim=256, heads=4, dropout=0.1):
+    def __init__(self, in_dim, hidden_dim=256, out_dim=256, num_heads=4, dropout=0.1):
         """
         图神经网络模块，用于处理对话图并提取结构性情感变化表示。
 
@@ -20,13 +20,13 @@ class EmotionGraphEncoder(nn.Module):
         self.in_dim = in_dim
         self.hidden_dim = hidden_dim
         self.out_dim = out_dim
-        self.heads = heads
+        self.num_heads = num_heads
         self.dropout = dropout
 
         self.conv1 = GATConv(
             in_channels=self.in_dim,
-            out_channels=self.hidden_dim // self.heads,
-            heads=self.heads,
+            out_channels=self.hidden_dim // self.num_heads,
+            heads=self.num_heads,
             concat=True,
             edge_dim=1,
         )

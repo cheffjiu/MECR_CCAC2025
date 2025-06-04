@@ -1,10 +1,10 @@
 import json
 from torch.utils.data import Dataset
 from typing import Dict, Any
-from feature_loader import FeatureLoader
-from retriever import Retriever
-from prompt_constructor import PromptConstructor
-from label_constructor import LabelConstructor
+from feature_loader import PtFeatureLoader, FeatureLoader
+from retriever import FAISSRetriever, Retriever
+from prompt_constructor import DefaultPromptConstructor, PromptConstructor
+from label_constructor import DefaultLabelConstructor, LabelConstructor
 
 
 class MECRDataset(Dataset):
@@ -58,12 +58,8 @@ class MECRDataset(Dataset):
         # 构建LLM提示
         prompt = self.prompt_constructor.build_prompt(sample, similar_samples)
 
-        # 构建LLM标签
-        if self.mode != "test":
-            label = self.label_constructor.build_label_from_sample(sample)
-
         results = {
-            "sample_id": sid,  # 调试使用
+            "sample_id": sid,
             "t_feats": t_feats,
             "v_feats": v_feats,
             "utterances": sample["utterances"],
@@ -73,18 +69,20 @@ class MECRDataset(Dataset):
             ),
             "prompt": prompt,
         }
-        if self.mode == "test":
+        # 构建LLM标签
+        if self.mode != "test":
+            label = self.label_constructor.build_label_from_sample(sample)
             results["label"] = label
         return results
 
     def _create_feature_loader(self, feature_root: str) -> "FeatureLoader":
-        return FeatureLoader(feature_root)
+        return PtFeatureLoader(feature_root)
 
     def _create_retriever(self, tokenizer: str, bert_model: str) -> "Retriever":
-        return Retriever(tokenizer, bert_model)
+        return FAISSRetriever(tokenizer, bert_model)
 
     def _create_prompt_constructor(self) -> "PromptConstructor":
-        return PromptConstructor()
+        return DefaultPromptConstructor()
 
     def _create_label_constructor(self) -> "LabelConstructor":
-        return LabelConstructor()
+        return DefaultLabelConstructor()

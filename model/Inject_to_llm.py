@@ -95,10 +95,11 @@ class InjectionModule(nn.Module):
             raise ValueError(
                 f"h_change 应为 2D 张量 (B, D_gnn), 实际维度: {h_change.dim()}"
             )
-
+        # print(f"h_change.dtype: {h_change.dtype}, h_llm.dtype: {h_llm.dtype}")
         # 确保张量在相同设备和数据类型上
-        h_change = h_change.to(device=h_llm.device, dtype=h_llm.dtype)
 
+        h_change = h_change.to(device=h_llm.device, dtype=h_llm.dtype)
+        # print(f"h_change.dtype: {h_change.dtype}, h_llm.dtype: {h_llm.dtype}")
         # 1. 投影 GNN 特征到 LLM 空间
         h_change_proj = self.h_change_proj(h_change)  # (B, d_model)
         h_change_proj = self.norm_h_change(h_change_proj)
@@ -130,8 +131,8 @@ class InjectionModule(nn.Module):
 
         # 调试信息
 
-        print(f"注入完成: LLM形状 {h_llm.shape}, GNN形状 {h_change.shape}")
-        print(f"注意力输出方差: {attn_output.var().item():.4f}")
-        print(f"门控均值: {gate.mean().item():.4f}")
+        # print(f"注入完成: LLM形状 {h_llm.shape}, GNN形状 {h_change.shape}")
+        # print(f"注意力输出方差: {attn_output.var().item():.4f}")
+        # print(f"门控均值: {gate.mean().item():.4f}")
 
         return output

@@ -17,14 +17,12 @@ def build_emotion_graph(fused_feats, utterances, change_span):
     # 将说话人列表转换为对应的数字id列表
     speaker_ids = [speaker_to_id[speaker] for speaker in speakers]
     # 将speaker_ids列表转换为PyTorch张量,并添加一个维度，形状[N,1]
-    spk_tensor = torch.tensor(
-        speaker_ids, device=device, dtype=torch.FloatTensor
-    ).unsqueeze(1)
+    spk_tensor = torch.tensor(speaker_ids, device=device, dtype=torch.long).unsqueeze(1)
 
     # 位置编码 (归一化位置)  shape (N, 1)
-    pos_encoding = torch.arange(N, device=device, dtype=torch.FloatTensor).unsqueeze(
-        1
-    ) / max(N - 1, 1)
+    pos_encoding = torch.arange(N, device=device, dtype=torch.long).unsqueeze(1) / max(
+        N - 1, 1
+    )
 
     # 节点特征：融合特征 + 位置编码 shape (N, d_fused+1)
     x_utter = torch.cat([fused_feats, pos_encoding], dim=-1)  # 在最后一个维度上拼接
@@ -69,7 +67,7 @@ def build_emotion_graph(fused_feats, utterances, change_span):
     # === 超级节点 ===
     super_idx = N
     # 超级节点位置信息 形状为[1,1]
-    super_pos = torch.tensor(N, device=device, dtype=torch.FloatTensor).unsqueeze(0)
+    super_pos = torch.tensor([N], device=device, dtype=torch.long).unsqueeze(0)
     # 超级节点特征 形状为[1,d_fused]
     super_feat = torch.mean(fused_feats, dim=0, keepdim=True)
     # 超级节点特征：位置编码 + 特征均值 形状为[1,d_fused+1]
@@ -113,5 +111,5 @@ def build_emotion_graph(fused_feats, utterances, change_span):
         x=x,
         edge_index=edge_index,
         edge_attr=edge_attr,
-        super_idx=torch.tensor(super_idx, device=device, dtype=torch.FloatTensor),
+        super_idx=torch.tensor(super_idx, device=device, dtype=torch.long),
     )

@@ -5,7 +5,7 @@ data/processed/train_cleaned/keyframes
 test_one_step.py
 debug.py
 tmp
-main.py
+checkpoints/
 
 test.py
 .DS_Store
