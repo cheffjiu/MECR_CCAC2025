@@ -76,8 +76,8 @@ def build_emotion_graph(fused_feats, utterances, change_span):
     x = torch.cat([x_utter, h_super], dim=0)
 
     # 超级节点边
-    start_idx = max(0, min(change_span[0], N - 1))
-    end_idx = max(0, min(change_span[1], N - 1))
+    start_idx = 0
+    end_idx = N - 1
     super_edges = torch.tensor(
         [
             [super_idx, start_idx],

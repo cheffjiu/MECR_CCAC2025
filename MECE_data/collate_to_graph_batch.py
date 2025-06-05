@@ -1,10 +1,10 @@
+import torch
 from torch_geometric.data import Batch
 from typing import List, Tuple, Union
 
 
 def collate_to_graph_batch(
     batch: List[dict],
-    fusion_model,  # CrossModalAttention
     build_graph_fn,  # build_emotion_graph
 ) -> Union[
     Tuple[Batch, List[str], List[str]], Tuple[Batch, List[str]]  # train/val或者test
@@ -28,12 +28,11 @@ def collate_to_graph_batch(
 
     for sample in batch:
         # 1. 融合特征
-        t_feats = sample["t_feats"]
-        v_feats = sample["v_feats"]
-        fused_feats = fusion_model(t_feats, v_feats)
-
+        t_feats = sample["t_feats"]  # shape [N, 768]
+        v_feats = sample["v_feats"]  # shape [N, 512]
+        fused_feats = torch.cat([t_feats, v_feats], dim=-1)  # shape [N, 1280]
         # 2. 构图
-        graph = build_graph_fn(fused_feats, sample["utterances"], sample["change_span"])
+        graph = build_graph_fn(fused_feats, sample["utterances"])
         data_list.append(graph)
 
         # 3. 收集 prompt 和 label

@@ -25,12 +25,15 @@ from peft import LoraConfig, get_peft_model, TaskType
 
 # 导入自定义模块
 from model.Qwen_with_Injection import QwenWithInjection
-from model.emotion_graph_encoder import EmotionGraphEncoder
+
+# from model.emotion_graph_encoder import EmotionGraphEncoder
 from model.Inject_to_llm import InjectionModule
 from MECE_data.mecr_dataset import MECRDataset
 from MECE_data.collate_to_graph_batch import collate_to_graph_batch
 from MECE_data.build_emotion_graph import build_emotion_graph
-from model.feature_fusion import CrossModalAttention
+
+# from model.feature_fusion import CrossModalAttention
+from model.multimodal_emotion_gnn import MultimodalEmotionGNN
 from utils.rationale_evaluate import RationaleEvaluator
 
 
@@ -40,7 +43,7 @@ class Trainer:
         训练器初始化。
         """
         # 1. 初始化 Accelerator
-        self.accelerator = Accelerator(cpu=True)
+        self.accelerator = Accelerator()
         self.config = cfg
         self.device = self.accelerator.device
 
@@ -50,15 +53,15 @@ class Trainer:
         )
 
         # 3. 初始化模块
-        self.feature_fusion_model = CrossModalAttention(
+        self.multimodal_emotion_gnn = MultimodalEmotionGNN(
+            # =====特征融合模块参数=====#
             d_t=cfg.cfg_feature_fusion_model.d_t,
             d_v=cfg.cfg_feature_fusion_model.d_v,
             d_fusion=cfg.cfg_feature_fusion_model.d_fusion,
             num_heads=cfg.cfg_feature_fusion_model.num_heads,
             num_layers=cfg.cfg_feature_fusion_model.num_layers,
             dropout=cfg.cfg_feature_fusion_model.dropout,
-        )
-        self.emotion_graph_encoder = EmotionGraphEncoder(
+            # =====GNN模块参数=====#
             in_dim=cfg.cfg_emotion_graph_model.gnn_in_dim,
             hidden_dim=cfg.cfg_emotion_graph_model.gnn_hidden_dim,
             out_dim=cfg.cfg_emotion_graph_model.gnn_out_dim,
@@ -101,15 +104,15 @@ class Trainer:
 
         # 4. 数据集和数据加载器
         self.train_dataset = MECRDataset(
-            json_path=cfg.cfg_dataset_dataloader.json_path_demo,
-            feature_root=cfg.cfg_dataset_dataloader.feature_root_demo,
+            json_path=cfg.cfg_dataset_dataloader.json_path_train,
+            feature_root=cfg.cfg_dataset_dataloader.feature_root_train,
             mode="train",
             tokenizer=cfg.cfg_dataset_dataloader.tokenizer_name,
             bert_model=cfg.cfg_dataset_dataloader.bert_name,
         )
         self.eval_dataset = MECRDataset(
-            json_path=cfg.cfg_dataset_dataloader.json_path_demo,
-            feature_root=cfg.cfg_dataset_dataloader.feature_root_demo,
+            json_path=cfg.cfg_dataset_dataloader.json_path_val,
+            feature_root=cfg.cfg_dataset_dataloader.feature_root_val,
             mode="val",
             tokenizer=cfg.cfg_dataset_dataloader.tokenizer_name,
             bert_model=cfg.cfg_dataset_dataloader.bert_name,
@@ -173,18 +176,18 @@ class Trainer:
         # 6. 使用 accelerator.prepare() 包装所有组件
         (
             self.model,
+            self.multimodal_emotion_gnn,
             self.optimizer,
             self.train_dataloader,
             self.eval_dataloader,
             self.lr_scheduler,
-            self.emotion_graph_encoder,
         ) = self.accelerator.prepare(
             self.model,
+            self.multimodal_emotion_gnn,
             self.optimizer,
             self.train_dataloader,
             self.eval_dataloader,
             self.lr_scheduler,
-            self.emotion_graph_encoder,
         )
 
         # 7. 评估器
@@ -235,7 +238,7 @@ class Trainer:
             labels = torch.where(labels == self.tokenizer.pad_token_id, -100, labels)
             # print(f"Shape of labels after tokenization and masking: {labels.shape}")
             # GNN 前向传播
-            h_change, _ = self.emotion_graph_encoder(batched_graph)
+            h_change, _ = self.multimodal_emotion_gnn(batched_graph)
 
             # 模型前向传播
             outputs = self.model(
@@ -313,7 +316,7 @@ class Trainer:
                         labels == self.tokenizer.pad_token_id, -100, labels
                     )
                     # GNN 前向传播,获取 h_change
-                    h_change, _ = self.emotion_graph_encoder(batched_graph)
+                    h_change, _ = self.multimodal_emotion_gnn(batched_graph)
 
                     # 计算损失
                     outputs = self.model(
@@ -411,7 +414,7 @@ class Trainer:
                 print(f"训练损失: {train_loss:.4f}")
 
             # --- 保存所有可训练模块的逻辑 ---
-            if self.accelerator.is_main_process: # 确保只在主进程保存
+            if self.accelerator.is_main_process:  # 确保只在主进程保存
                 # 获取原始的 QwenWithInjection 模型实例，而不是 PeftModel 包装器
                 # unwrapped_main_model 是 QwenWithInjection 的实例
                 unwrapped_main_model = self.accelerator.unwrap_model(self.model)
@@ -428,19 +431,31 @@ class Trainer:
                 unwrapped_main_model.save_pretrained(epoch_save_dir)
 
                 # 2. 保存 injection_module 的参数
-                print(f"保存 injection_module 参数到 {epoch_save_dir}/injection_module.pt...")
-                torch.save(unwrapped_main_model.injection_module.state_dict(),
-                           os.path.join(epoch_save_dir, "injection_module.pt"))
+                print(
+                    f"保存 injection_module 参数到 {epoch_save_dir}/injection_module.pt..."
+                )
+                torch.save(
+                    unwrapped_main_model.injection_module.state_dict(),
+                    os.path.join(epoch_save_dir, "injection_module.pt"),
+                )
 
                 # 3. 保存 emotion_graph_encoder 的参数
-                print(f"保存 emotion_graph_encoder 参数到 {epoch_save_dir}/emotion_graph_encoder.pt...")
-                torch.save(self.emotion_graph_encoder.state_dict(), # emotion_graph_encoder 是在 trainer 层面 prepare 的
-                           os.path.join(epoch_save_dir, "emotion_graph_encoder.pt"))
+                print(
+                    f"保存 emotion_graph_encoder 参数到 {epoch_save_dir}/emotion_graph_encoder.pt..."
+                )
+                torch.save(
+                    self.emotion_graph_encoder.state_dict(),  # emotion_graph_encoder 是在 trainer 层面 prepare 的
+                    os.path.join(epoch_save_dir, "emotion_graph_encoder.pt"),
+                )
 
                 # 4. 保存 feature_fusion_model 的参数
-                print(f"保存 feature_fusion_model 参数到 {epoch_save_dir}/feature_fusion_model.pt...")
-                torch.save(self.feature_fusion_model.state_dict(), # feature_fusion_model 是在 trainer 层面初始化的
-                           os.path.join(epoch_save_dir, "feature_fusion_model.pt"))
+                print(
+                    f"保存 feature_fusion_model 参数到 {epoch_save_dir}/feature_fusion_model.pt..."
+                )
+                torch.save(
+                    self.feature_fusion_model.state_dict(),  # feature_fusion_model 是在 trainer 层面初始化的
+                    os.path.join(epoch_save_dir, "feature_fusion_model.pt"),
+                )
             # --- 保存逻辑结束 ---
 
             eval_metrics = self._evaluate()
@@ -465,17 +480,29 @@ class Trainer:
                     print(f"保存最佳 LoRA 适配器到 {best_model_save_dir}...")
                     unwrapped_main_model.save_pretrained(best_model_save_dir)
 
-                    print(f"保存最佳 injection_module 参数到 {best_model_save_dir}/injection_module.pt...")
-                    torch.save(unwrapped_main_model.injection_module.state_dict(),
-                               os.path.join(best_model_save_dir, "injection_module.pt"))
+                    print(
+                        f"保存最佳 injection_module 参数到 {best_model_save_dir}/injection_module.pt..."
+                    )
+                    torch.save(
+                        unwrapped_main_model.injection_module.state_dict(),
+                        os.path.join(best_model_save_dir, "injection_module.pt"),
+                    )
 
-                    print(f"保存最佳 emotion_graph_encoder 参数到 {best_model_save_dir}/emotion_graph_encoder.pt...")
-                    torch.save(self.emotion_graph_encoder.state_dict(),
-                               os.path.join(best_model_save_dir, "emotion_graph_encoder.pt"))
+                    print(
+                        f"保存最佳 emotion_graph_encoder 参数到 {best_model_save_dir}/emotion_graph_encoder.pt..."
+                    )
+                    torch.save(
+                        self.emotion_graph_encoder.state_dict(),
+                        os.path.join(best_model_save_dir, "emotion_graph_encoder.pt"),
+                    )
 
-                    print(f"保存最佳 feature_fusion_model 参数到 {best_model_save_dir}/feature_fusion_model.pt...")
-                    torch.save(self.feature_fusion_model.state_dict(),
-                               os.path.join(best_model_save_dir, "feature_fusion_model.pt"))
+                    print(
+                        f"保存最佳 feature_fusion_model 参数到 {best_model_save_dir}/feature_fusion_model.pt..."
+                    )
+                    torch.save(
+                        self.feature_fusion_model.state_dict(),
+                        os.path.join(best_model_save_dir, "feature_fusion_model.pt"),
+                    )
 
                 else:
                     self.epochs_no_improve += 1
@@ -491,5 +518,6 @@ class Trainer:
 
         if self.accelerator.is_main_process:
             print("训练结束。")
-            print(f"最佳模型所有组件已保存到：{os.path.join(self.output_dir, 'best_model')}")
-
+            print(
+                f"最佳模型所有组件已保存到：{os.path.join(self.output_dir, 'best_model')}"
+            )

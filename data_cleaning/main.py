@@ -19,7 +19,7 @@ def main():
     # file_path = "data/MECR_CCAC2025/train.json"#训练集json文件路径
     file_path = "data/MECR_CCAC2025/val.json"#验证集json文件路径
     # file_path = "data/MECR_CCAC2025/demo.json" #样本json文件路径
-    sub_name=file_path[19:-1]
+    sub_name=file_path[19:]
     logging.info("正在处理文件：{}".format(sub_name))
     file_path = os.path.join(workspace_root, file_path)
     train_samples = pipeline.process_file(file_path)

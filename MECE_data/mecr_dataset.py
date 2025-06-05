@@ -63,10 +63,6 @@ class MECRDataset(Dataset):
             "t_feats": t_feats,
             "v_feats": v_feats,
             "utterances": sample["utterances"],
-            "change_span": (
-                sample["emo_change"]["start_idx"],
-                sample["emo_change"]["end_idx"],
-            ),
             "prompt": prompt,
         }
         # 构建LLM标签

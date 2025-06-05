@@ -18,6 +18,7 @@ class ChangeIntervalParser:
             start_idx = next((idx for idx, u in enumerate(utterances) if u["id"] == start_utt_id), -1)
             end_idx = next((idx for idx, u in enumerate(utterances) if u["id"] == end_utt_id), -1)
             
+            
             if start_idx == -1 or end_idx == -1:
                 continue
             
