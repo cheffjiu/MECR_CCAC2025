@@ -410,13 +410,38 @@ class Trainer:
             if self.accelerator.is_main_process:
                 print(f"训练损失: {train_loss:.4f}")
 
-            if epoch == save_after_epoch - 1:
-                print(f"第 {save_after_epoch} 个 epoch，保存模型...")
-                unwrapped_model = self.accelerator.unwrap_model(self.model)
+            # --- 保存所有可训练模块的逻辑 ---
+            if self.accelerator.is_main_process: # 确保只在主进程保存
+                # 获取原始的 QwenWithInjection 模型实例，而不是 PeftModel 包装器
+                # unwrapped_main_model 是 QwenWithInjection 的实例
+                unwrapped_main_model = self.accelerator.unwrap_model(self.model)
 
-                unwrapped_model.save_pretrained(
-                    os.path.join(self.output_dir, f"lora_epoch_{save_after_epoch}")
-                )
+                # 确保保存目录存在
+                epoch_save_dir = os.path.join(self.output_dir, f"epoch_{epoch + 1}")
+                os.makedirs(epoch_save_dir, exist_ok=True)
+
+                # 1. 保存 LoRA 适配器 (通过 PeftModel 的 save_pretrained 方法)
+                # 因为 unwrapped_main_model 仍然是 PeftModel 包装的，可以直接调用 save_pretrained
+                # 或者如果你在外面用 model = get_peft_model(model, ...) 包装了，
+                # 这里的 unwrapped_main_model 实际上就是那个 PeftModel
+                print(f"保存 LoRA 适配器到 {epoch_save_dir}...")
+                unwrapped_main_model.save_pretrained(epoch_save_dir)
+
+                # 2. 保存 injection_module 的参数
+                print(f"保存 injection_module 参数到 {epoch_save_dir}/injection_module.pt...")
+                torch.save(unwrapped_main_model.injection_module.state_dict(),
+                           os.path.join(epoch_save_dir, "injection_module.pt"))
+
+                # 3. 保存 emotion_graph_encoder 的参数
+                print(f"保存 emotion_graph_encoder 参数到 {epoch_save_dir}/emotion_graph_encoder.pt...")
+                torch.save(self.emotion_graph_encoder.state_dict(), # emotion_graph_encoder 是在 trainer 层面 prepare 的
+                           os.path.join(epoch_save_dir, "emotion_graph_encoder.pt"))
+
+                # 4. 保存 feature_fusion_model 的参数
+                print(f"保存 feature_fusion_model 参数到 {epoch_save_dir}/feature_fusion_model.pt...")
+                torch.save(self.feature_fusion_model.state_dict(), # feature_fusion_model 是在 trainer 层面初始化的
+                           os.path.join(epoch_save_dir, "feature_fusion_model.pt"))
+            # --- 保存逻辑结束 ---
 
             eval_metrics = self._evaluate()
             if self.accelerator.is_main_process:
@@ -426,14 +451,31 @@ class Trainer:
 
                 if current_eval_score > self.best_eval_score + self.min_delta:
                     print(
-                        f"验证分数改善 ({self.best_eval_score:.4f} -> {current_eval_score:.4f})，保存模型..."
+                        f"验证分数改善 ({self.best_eval_score:.4f} -> {current_eval_score:.4f})，保存最佳模型..."
                     )
                     self.best_eval_score = current_eval_score
                     self.epochs_no_improve = 0
 
-                    unwrapped_model = self.accelerator.unwrap_model(self.model)
+                    # 最佳模型保存 (同上，保存所有模块)
+                    best_model_save_dir = os.path.join(self.output_dir, "best_model")
+                    os.makedirs(best_model_save_dir, exist_ok=True)
 
-                    unwrapped_model.save_pretrained(self.output_dir)
+                    unwrapped_main_model = self.accelerator.unwrap_model(self.model)
+
+                    print(f"保存最佳 LoRA 适配器到 {best_model_save_dir}...")
+                    unwrapped_main_model.save_pretrained(best_model_save_dir)
+
+                    print(f"保存最佳 injection_module 参数到 {best_model_save_dir}/injection_module.pt...")
+                    torch.save(unwrapped_main_model.injection_module.state_dict(),
+                               os.path.join(best_model_save_dir, "injection_module.pt"))
+
+                    print(f"保存最佳 emotion_graph_encoder 参数到 {best_model_save_dir}/emotion_graph_encoder.pt...")
+                    torch.save(self.emotion_graph_encoder.state_dict(),
+                               os.path.join(best_model_save_dir, "emotion_graph_encoder.pt"))
+
+                    print(f"保存最佳 feature_fusion_model 参数到 {best_model_save_dir}/feature_fusion_model.pt...")
+                    torch.save(self.feature_fusion_model.state_dict(),
+                               os.path.join(best_model_save_dir, "feature_fusion_model.pt"))
 
                 else:
                     self.epochs_no_improve += 1
@@ -449,5 +491,5 @@ class Trainer:
 
         if self.accelerator.is_main_process:
             print("训练结束。")
-            if os.path.exists(self.output_dir):
-                print(f"最佳LoRA适配器已保存到：{self.output_dir}")
+            print(f"最佳模型所有组件已保存到：{os.path.join(self.output_dir, 'best_model')}")
+
