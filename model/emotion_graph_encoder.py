@@ -45,10 +45,10 @@ class EmotionGraphEncoder(nn.Module):
 
         # 映射到结构特征向量
         self.mlp = nn.Sequential(
-            nn.Linear(self.out_dim, 612),
+            nn.Linear(self.out_dim, 512),
             nn.GELU(),
-            nn.LayerNorm(612),
-            nn.Linear(612, 1024),
+            nn.LayerNorm(512),
+            nn.Linear(512, 1024),
         )
 
     def forward(self, data):
@@ -65,6 +65,7 @@ class EmotionGraphEncoder(nn.Module):
             h_all (Tensor): 所有节点的图编码特征 (N, out_dim)
         """
         x = data.x
+        print(x.shape)
         edge_index = data.edge_index
         edge_attr = data.edge_attr
 

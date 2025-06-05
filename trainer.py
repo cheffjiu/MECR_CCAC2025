@@ -1,5 +1,7 @@
 import os
 import sys
+os.environ["TOKENIZERS_PARALLELISM"] = "false" # 关闭tokenizer的并行化，避免与dataloader的多线程冲突，导致死锁
+
 
 current_file_path = os.path.abspath(__file__)
 project_root = os.path.abspath(os.path.join(os.path.dirname(current_file_path)))
@@ -29,7 +31,7 @@ from model.Qwen_with_Injection import QwenWithInjection
 # from model.emotion_graph_encoder import EmotionGraphEncoder
 from model.Inject_to_llm import InjectionModule
 from MECE_data.mecr_dataset import MECRDataset
-from MECE_data.collate_to_graph_batch import collate_to_graph_batch
+from MECE_data.collate_to_graph_batch import CustomCollate
 from MECE_data.build_emotion_graph import build_emotion_graph
 
 # from model.feature_fusion import CrossModalAttention
@@ -43,7 +45,7 @@ class Trainer:
         训练器初始化。
         """
         # 1. 初始化 Accelerator
-        self.accelerator = Accelerator()
+        self.accelerator = Accelerator(cpu=True)
         self.config = cfg
         self.device = self.accelerator.device
 
@@ -55,18 +57,18 @@ class Trainer:
         # 3. 初始化模块
         self.multimodal_emotion_gnn = MultimodalEmotionGNN(
             # =====特征融合模块参数=====#
-            d_t=cfg.cfg_feature_fusion_model.d_t,
-            d_v=cfg.cfg_feature_fusion_model.d_v,
+            t_feat_dim=cfg.cfg_feature_fusion_model.d_t,
+            v_feat_dim=cfg.cfg_feature_fusion_model.d_v,
             d_fusion=cfg.cfg_feature_fusion_model.d_fusion,
-            num_heads=cfg.cfg_feature_fusion_model.num_heads,
-            num_layers=cfg.cfg_feature_fusion_model.num_layers,
-            dropout=cfg.cfg_feature_fusion_model.dropout,
+            fusion_heads=cfg.cfg_feature_fusion_model.num_heads,
+            fusion_layers=cfg.cfg_feature_fusion_model.num_layers,
+            fusion_dropout=cfg.cfg_feature_fusion_model.dropout,
             # =====GNN模块参数=====#
-            in_dim=cfg.cfg_emotion_graph_model.gnn_in_dim,
-            hidden_dim=cfg.cfg_emotion_graph_model.gnn_hidden_dim,
-            out_dim=cfg.cfg_emotion_graph_model.gnn_out_dim,
-            num_heads=cfg.cfg_emotion_graph_model.num_heads,
-            dropout=cfg.cfg_emotion_graph_model.dropout,
+            gnn_in_dim=cfg.cfg_emotion_graph_model.gnn_in_dim,
+            gnn_hidden_dim=cfg.cfg_emotion_graph_model.gnn_hidden_dim,
+            gnn_out_dim=cfg.cfg_emotion_graph_model.gnn_out_dim,
+            gnn_heads=cfg.cfg_emotion_graph_model.num_heads,
+            gnn_dropout=cfg.cfg_emotion_graph_model.dropout,
         )
 
         self.injection_module = InjectionModule(
@@ -104,8 +106,8 @@ class Trainer:
 
         # 4. 数据集和数据加载器
         self.train_dataset = MECRDataset(
-            json_path=cfg.cfg_dataset_dataloader.json_path_train,
-            feature_root=cfg.cfg_dataset_dataloader.feature_root_train,
+            json_path=cfg.cfg_dataset_dataloader.json_path_demo,
+            feature_root=cfg.cfg_dataset_dataloader.feature_root_demo,
             mode="train",
             tokenizer=cfg.cfg_dataset_dataloader.tokenizer_name,
             bert_model=cfg.cfg_dataset_dataloader.bert_name,
@@ -122,10 +124,8 @@ class Trainer:
             self.train_dataset,
             batch_size=cfg.cfg_dataset_dataloader.batch_size,
             shuffle=True,
-            collate_fn=lambda batch: collate_to_graph_batch(
-                batch,
-                self.feature_fusion_model,
-                build_emotion_graph,
+            collate_fn=CustomCollate(             
+                build_emotion_graph
             ),
             num_workers=cfg.cfg_dataset_dataloader.num_workers,
             pin_memory=True,
@@ -134,8 +134,8 @@ class Trainer:
             self.eval_dataset,
             batch_size=cfg.cfg_dataset_dataloader.batch_size,
             shuffle=False,
-            collate_fn=lambda batch: collate_to_graph_batch(
-                batch, self.feature_fusion_model, build_emotion_graph
+            collate_fn=CustomCollate(
+                build_emotion_graph
             ),
             num_workers=cfg.cfg_dataset_dataloader.num_workers,
             pin_memory=True,
@@ -402,9 +402,6 @@ class Trainer:
             return metrics
 
     def train(self):
-        # 设置第3个epoch保存一次模型
-        save_after_epoch = 3
-
         for epoch in range(self.config.cfg_train.num_train_epochs):
             if self.accelerator.is_main_process:
                 print(f"\nEpoch {epoch + 1}/{self.config.cfg_train.num_train_epochs}")
@@ -413,50 +410,40 @@ class Trainer:
             if self.accelerator.is_main_process:
                 print(f"训练损失: {train_loss:.4f}")
 
-            # --- 保存所有可训练模块的逻辑 ---
+            # --- 每个 Epoch 结束时的模型保存逻辑 ---
             if self.accelerator.is_main_process:  # 确保只在主进程保存
-                # 获取原始的 QwenWithInjection 模型实例，而不是 PeftModel 包装器
-                # unwrapped_main_model 是 QwenWithInjection 的实例
-                unwrapped_main_model = self.accelerator.unwrap_model(self.model)
-
-                # 确保保存目录存在
                 epoch_save_dir = os.path.join(self.output_dir, f"epoch_{epoch + 1}")
                 os.makedirs(epoch_save_dir, exist_ok=True)
 
-                # 1. 保存 LoRA 适配器 (通过 PeftModel 的 save_pretrained 方法)
-                # 因为 unwrapped_main_model 仍然是 PeftModel 包装的，可以直接调用 save_pretrained
-                # 或者如果你在外面用 model = get_peft_model(model, ...) 包装了，
-                # 这里的 unwrapped_main_model 实际上就是那个 PeftModel
-                print(f"保存 LoRA 适配器到 {epoch_save_dir}...")
-                unwrapped_main_model.save_pretrained(epoch_save_dir)
+                # 1. 解包所有经过 accelerator.prepare 包装过的模块
+                unwrapped_llm_model = self.accelerator.unwrap_model(self.model)
+                unwrapped_gnn_model = self.accelerator.unwrap_model(self.multimodal_emotion_gnn)
 
-                # 2. 保存 injection_module 的参数
+                # 2. 保存 LoRA 适配器
+                # PeftModel 的 save_pretrained 方法会保存 LoRA 相关的权重和配置
+                print(f"保存 LoRA 适配器到 {epoch_save_dir}/lora_adapters...")
+                unwrapped_llm_model.save_pretrained(os.path.join(epoch_save_dir, "lora_adapters"))
+
+                # 3. 保存 InjectionModule 的参数
+                # InjectionModule 是 QwenWithInjection 的一个子模块
+                # 需要明确保存其 state_dict
                 print(
-                    f"保存 injection_module 参数到 {epoch_save_dir}/injection_module.pt..."
+                    f"保存 InjectionModule 参数到 {epoch_save_dir}/injection_module.pt..."
                 )
                 torch.save(
-                    unwrapped_main_model.injection_module.state_dict(),
+                    unwrapped_llm_model.injection_module.state_dict(),
                     os.path.join(epoch_save_dir, "injection_module.pt"),
                 )
 
-                # 3. 保存 emotion_graph_encoder 的参数
-                print(
-                    f"保存 emotion_graph_encoder 参数到 {epoch_save_dir}/emotion_graph_encoder.pt..."
-                )
+                # 4. 保存 MultimodalEmotionGNN 的参数
+                # MultimodalEmotionGNN 是一个独立的模型，保存其 state_dict
+                print(f"保存 MultimodalEmotionGNN 参数到 {epoch_save_dir}/multimodal_emotion_gnn.pt...")
                 torch.save(
-                    self.emotion_graph_encoder.state_dict(),  # emotion_graph_encoder 是在 trainer 层面 prepare 的
-                    os.path.join(epoch_save_dir, "emotion_graph_encoder.pt"),
+                    unwrapped_gnn_model.state_dict(),
+                    os.path.join(epoch_save_dir, "multimodal_emotion_gnn.pt"),
                 )
 
-                # 4. 保存 feature_fusion_model 的参数
-                print(
-                    f"保存 feature_fusion_model 参数到 {epoch_save_dir}/feature_fusion_model.pt..."
-                )
-                torch.save(
-                    self.feature_fusion_model.state_dict(),  # feature_fusion_model 是在 trainer 层面初始化的
-                    os.path.join(epoch_save_dir, "feature_fusion_model.pt"),
-                )
-            # --- 保存逻辑结束 ---
+            # --- 每个 Epoch 结束时的模型保存逻辑结束 ---
 
             eval_metrics = self._evaluate()
             if self.accelerator.is_main_process:
@@ -471,37 +458,34 @@ class Trainer:
                     self.best_eval_score = current_eval_score
                     self.epochs_no_improve = 0
 
-                    # 最佳模型保存 (同上，保存所有模块)
+                    # 最佳模型保存 (只保存最佳的 LoRA, InjectionModule 和 GNN 模块)
                     best_model_save_dir = os.path.join(self.output_dir, "best_model")
                     os.makedirs(best_model_save_dir, exist_ok=True)
 
-                    unwrapped_main_model = self.accelerator.unwrap_model(self.model)
+                    # 再次解包确保获取当前最佳模型的未包装版本
+                    unwrapped_llm_model = self.accelerator.unwrap_model(self.model)
+                    unwrapped_gnn_model = self.accelerator.unwrap_model(self.multimodal_emotion_gnn)
 
-                    print(f"保存最佳 LoRA 适配器到 {best_model_save_dir}...")
-                    unwrapped_main_model.save_pretrained(best_model_save_dir)
+                    # 1. 保存最佳 LoRA 适配器
+                    print(f"保存最佳 LoRA 适配器到 {best_model_save_dir}/lora_adapters...")
+                    unwrapped_llm_model.save_pretrained(os.path.join(best_model_save_dir, "lora_adapters"))
 
+                    # 2. 保存最佳 InjectionModule 的参数
                     print(
-                        f"保存最佳 injection_module 参数到 {best_model_save_dir}/injection_module.pt..."
+                        f"保存最佳 InjectionModule 参数到 {best_model_save_dir}/injection_module.pt..."
                     )
                     torch.save(
-                        unwrapped_main_model.injection_module.state_dict(),
+                        unwrapped_llm_model.injection_module.state_dict(),
                         os.path.join(best_model_save_dir, "injection_module.pt"),
                     )
 
+                    # 3. 保存最佳 MultimodalEmotionGNN 的参数
                     print(
-                        f"保存最佳 emotion_graph_encoder 参数到 {best_model_save_dir}/emotion_graph_encoder.pt..."
+                        f"保存最佳 MultimodalEmotionGNN 参数到 {best_model_save_dir}/multimodal_emotion_gnn.pt..."
                     )
                     torch.save(
-                        self.emotion_graph_encoder.state_dict(),
-                        os.path.join(best_model_save_dir, "emotion_graph_encoder.pt"),
-                    )
-
-                    print(
-                        f"保存最佳 feature_fusion_model 参数到 {best_model_save_dir}/feature_fusion_model.pt..."
-                    )
-                    torch.save(
-                        self.feature_fusion_model.state_dict(),
-                        os.path.join(best_model_save_dir, "feature_fusion_model.pt"),
+                        unwrapped_gnn_model.state_dict(),
+                        os.path.join(best_model_save_dir, "multimodal_emotion_gnn.pt"),
                     )
 
                 else:
@@ -514,7 +498,7 @@ class Trainer:
                     print(f"早停触发！连续 {self.patience} 个 Epoch 未见改善。")
                     break
 
-            self.accelerator.wait_for_everyone()
+            self.accelerator.wait_for_everyone() # 等待所有进程完成当前 epoch
 
         if self.accelerator.is_main_process:
             print("训练结束。")

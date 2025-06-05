@@ -24,9 +24,9 @@ class Retriever(ABC):
 
 
 class FAISSRetriever(Retriever):
-    def __init__(self, tokenizer: str, bert_model: str) -> None:
-        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer)
-        self.bert_model = AutoModel.from_pretrained(bert_model)
+    def __init__(self, tokenizer_instance, bert_model_instance: str) -> None:
+        self.tokenizer = tokenizer_instance
+        self.bert_model = bert_model_instance
 
     def build_query(self, sample: Dict[str, Any]) -> torch.FloatTensor:
         utterances = sample["utterances"]

@@ -1,6 +1,7 @@
 import torch
 from torch_geometric.data import Batch
 from typing import List, Tuple, Union
+from build_emotion_graph import build_emotion_graph
 
 
 def collate_to_graph_batch(
@@ -48,3 +49,24 @@ def collate_to_graph_batch(
         return batched_graph, prompt_texts, label_texts
     else:
         return batched_graph, prompt_texts
+
+class CustomCollate:
+    def __init__(self, build_graph_fn):
+        """
+        初始化 CustomCollate 实例。
+        Args:
+            build_graph_fn: 用于构建图的函数（例如 build_emotion_graph）。
+        """
+        self.build_graph_fn = build_emotion_graph
+
+    def __call__(self, batch: List[dict]):
+        """
+        当 CustomCollate 实例被调用时，它会执行数据整理逻辑。
+        Args:
+            batch (List[dict]): DataLoader 传递的样本批次。
+        Returns:
+            Union[Tuple[Batch, List[str], List[str]], Tuple[Batch, List[str]]]:
+                整理后的批图、prompt 文本和可选的 label 文本。
+        """
+        # 调用之前定义的 collate_to_graph_batch 函数，并传入 build_graph_fn
+        return collate_to_graph_batch(batch, self.build_graph_fn)

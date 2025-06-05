@@ -22,7 +22,7 @@ dependencies:
   - datasets=2.14.4
   - dill=0.3.7
   - evaluate=0.4.3
-  - faiss=1.9.0
+  - faiss-cpu=1.9.0
   - fastapi=0.115.12
   - filelock=3.18.0
   - fonttools=4.58.1

@@ -2,7 +2,7 @@ from torch_geometric.data import Data
 import torch
 
 
-def build_emotion_graph(fused_feats, utterances, change_span):
+def build_emotion_graph(fused_feats, utterances):
     # 从fused_feats张量中得到device信息,保证所有的计算都在同一个设备上
     device = fused_feats.device
     # 设置图节点总数N

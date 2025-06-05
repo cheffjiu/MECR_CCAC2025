@@ -2,7 +2,7 @@ import json
 from typing import List, Dict
 from transformers import AutoTokenizer
 import evaluate
-
+import nltk
 
 class RationaleEvaluator:
     def __init__(

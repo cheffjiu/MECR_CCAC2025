@@ -18,7 +18,7 @@ class config_feature_fusion_model:
 
 @dataclass
 class config_emotion_graph_model:
-    gnn_in_dim: int = 257  # GNN输入维度=融合特征维度+1(位置编码)
+    gnn_in_dim: int = 256 # GNN输入维度=融合特征维度+1(位置编码)
     gnn_hidden_dim: int = 256  # GNN隐藏层维度
     gnn_out_dim: int = 256  # GNN输出维度
     num_heads: int = 4  # GNN多头注意力头数
@@ -57,8 +57,8 @@ class config_dataset_dataloader:
     )
     feature_root_val: str = os.path.join(project_root, "data/feature/val")
     # ===配置dataloader参数===#
-    batch_size: int = 16  # 批大小
-    num_workers: int = 4 # 工作进程数
+    batch_size: int = 64 # 批大小
+    num_workers: int = 8 # 工作进程数
 
 
 @dataclass

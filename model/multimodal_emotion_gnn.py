@@ -16,6 +16,7 @@ class MultimodalEmotionGNN(nn.Module):
         fusion_layers: int,
         fusion_dropout: float = 0.1,
         # GNN模块参数
+        gnn_in_dim: int = 256,
         gnn_hidden_dim: int = 256,
         gnn_out_dim: int = 256,
         gnn_heads: int = 4,
@@ -47,7 +48,11 @@ class MultimodalEmotionGNN(nn.Module):
             num_layers=fusion_layers,
             dropout=fusion_dropout,
         )
-
+        self.fusion_dim_to_gnn_dim=nn.Sequential(
+            nn.Linear(d_fusion+1, gnn_in_dim),
+            nn.GELU(),
+            nn.LayerNorm(gnn_in_dim),
+        )
         # 2. 实例化图编码器模块
         # GNN的输入维度就是融合后的维度 d_fusion
         self.gnn_module = EmotionGraphEncoder(
@@ -78,16 +83,18 @@ class MultimodalEmotionGNN(nn.Module):
         node_t_feats = original_x[:, : self.t_feat_dim]
         node_v_feats = original_x[:, self.t_feat_dim : -1]
         node_v_pos = original_x[:, -1]
+        print(f"node_t_feats: {node_v_pos.shape}")
 
         # 2. 对每个节点的特征进行多模态融合
         # 输入: [N, d_t], [N, d_v] -> 输出: [N, d_fusion]
         fused_node_features = self.fusion_module(node_t_feats, node_v_feats)
+        print(f"fused_node_features: {fused_node_features.shape}")
         # 拼接上位置编码
-        fused_node_features = torch.cat([fused_node_features, node_v_pos], dim=-1)
+        fused_node_features = torch.cat([fused_node_features, node_v_pos.unsqueeze(-1)], dim=-1)
+        # 映射到GNN输入维度
+        fused_node_features = self.fusion_dim_to_gnn_dim(fused_node_features)
         # 3. 更新图数据中的节点特征为融合后的特征
-        # 这是实现流程的核心，用计算得到的新特征替换掉旧的拼接特征
         data.x = fused_node_features
-
         # 4. 将更新后的图送入GNN编码器进行图级别的推理
         h_change, h_all = self.gnn_module(data)
 

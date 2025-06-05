@@ -5,6 +5,7 @@ from feature_loader import PtFeatureLoader, FeatureLoader
 from retriever import FAISSRetriever, Retriever
 from prompt_constructor import DefaultPromptConstructor, PromptConstructor
 from label_constructor import DefaultLabelConstructor, LabelConstructor
+from transformers import AutoTokenizer, AutoModel
 
 
 class MECRDataset(Dataset):
@@ -20,8 +21,9 @@ class MECRDataset(Dataset):
         self.json_path = json_path
         self.feature_root = feature_root
         self.mode = mode
-        self.tokenizer = tokenizer
-        self.bert_model = bert_model
+        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer)
+        self.bert_model = AutoModel.from_pretrained(bert_model)
+
         # self.device = device
         # 加载json数据
         with open(json_path, "r", encoding="utf-8") as f:
