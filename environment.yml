@@ -1,9 +1,9 @@
 name: pytorch_env
 channels:
-  - pytorch # PyTorch 官方 channel，用于获取 CUDA 支持的 PyTorch
-  - nvidia/label/cuda-12.4.0 # 明确指定 CUDA 12.4 版本
-  - conda-forge # 提供了许多科学计算和机器学习的包
-  - defaults # conda 默认 channel
+  - pytorch
+  - nvidia/label/cuda-12.4.0 # 对于查找 NVIDIA CUDA 组件至关重要
+  - conda-forge
+  - defaults
 dependencies:
   # Python 和核心包
   - python=3.10
@@ -12,18 +12,16 @@ dependencies:
   - peft
   - accelerate
   - evaluate
-  - pytorch=2.6.0=cuda12.4_py310* # 指定 PyTorch 版本并强制 CUDA 12.4
-  - torchvision=0.21.0=cuda12.4_py310* # 指定 torchvision 版本并强制 CUDA 12.4
-  - torchaudio=2.6.0=cuda12.4_py310* # 指定 torchaudio 版本并强制 CUDA 12.4
   
-  # 注意：torch_geometric 及其相关库通常建议通过 pip 安装预编译的 wheel 包，
-  # 以确保与特定 PyTorch 和 CUDA 版本的兼容性。
-  # 因此，这些将在 pip 部分处理。
-pip:
-  - torch_geometric
-  - pyg_lib
-  - torch_scatter
-  - torch_sparse
-  - torch_cluster
-  - torch_spline_conv
-  # 注意：pip install -f 后面的链接是数据源，conda 在处理 pip 部分时会使用它们
+  # 使用 pytorch-cuda 元包来拉取 PyTorch、torchvision、torchaudio，
+  # 以及 CUDA 12.4 兼容的 cudatoolkit
+  - pytorch-cuda=12.4 # 这将确保 PyTorch、torchvision、torchaudio 启用 CUDA 12.4
+  - pytorch=2.6.0     # 指定 PyTorch 版本，让 pytorch-cuda 处理 CUDA 构建
+  - torchvision=0.21.0
+  - torchaudio=2.6.0
+  
+  # 其他 Conda 可以提供的必要库
+  - numpy
+  - pandas
+  - scipy
+  - tqdm
