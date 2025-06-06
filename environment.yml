@@ -98,16 +98,18 @@ dependencies:
   - yaml=0.2.5
   - zipp=3.21.0
   - zstd=1.5.7
-  - cudatoolkit=11.8.0  # 添加CUDA支持
-  - cudnn=8.9.2.26  # 添加cuDNN支持
+  - cudatoolkit=12.4.0 # 更改为 CUDA 12.4
+  # - cudnn=8.9.2.26  # 通常 cudnn 版本在 Conda 中保持，因为它兼容性较广，如果没有明确的 cu124 版本，可以暂时保留或移除让 conda/pip 自行解决
+  # 移除以下这些特定于 CUDA 11 的 nvidia-*cu11 pip 包，它们不再需要且可能导致冲突
+  # - nvidia-cublas-cu11==11.10.3.66
+  # - nvidia-cuda-nvrtc-cu11==11.7.99
+  # - nvidia-cuda-runtime-cu11==11.7.99
+  # - nvidia-cudnn-cu11==8.5.0.96
   - pip:
-      - torch==2.6.0+cu118 --extra-index-url https://download.pytorch.org/whl/cu118
-      - torchvision==0.21.0+cu118 --extra-index-url https://download.pytorch.org/whl/cu118
-      - torchaudio==2.6.0 --extra-index-url https://download.pytorch.org/whl/cu118
-      - nvidia-cublas-cu11=11.10.3.66
-      - nvidia-cuda-nvrtc-cu11=11.7.99
-      - nvidia-cuda-runtime-cu11=11.7.99
-      - nvidia-cudnn-cu11=8.5.0.96
+      # 根据 PyTorch 官网 (https://pytorch.org/get-started/locally/) for PyTorch 2.6.0 + CUDA 12.4
+      - torch==2.6.0+cu124 --extra-index-url https://download.pytorch.org/whl/cu124
+      - torchvision==0.21.0+cu124 --extra-index-url https://download.pytorch.org/whl/cu124
+      - torchaudio==2.6.0+cu124 --extra-index-url https://download.pytorch.org/whl/cu124
       - fastapi-cli==0.0.7
       - gradio-client==1.10.2
       # 保留原始pip包
