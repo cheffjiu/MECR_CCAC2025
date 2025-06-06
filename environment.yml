@@ -1,41 +1,13 @@
-name: pytorch_env # 给它一个全新的、独特的名字
+name: pytorch_env 
 channels:
-  - pytorch
-  - nvidia
-  - conda-forge # 将 conda-forge 添加在这里，在 defaults 之前，以便获得更广泛的包可用性
+  - conda-forge 
   - defaults
 dependencies:
-  # Python 和核心包
+ 
   - python=3.10
-
-  # PyTorch 和 CUDA 特定包
-  # pytorch-cuda=12.4 是一个元包，它会拉取兼容的 PyTorch、torchvision、torchaudio，
-  # 以及 CUDA 12.4 兼容的 cudatoolkit。
-  # 这是通过 Conda 安装特定 CUDA 版本 PyTorch 的推荐方式。
-  - pytorch-cuda=12.4
-  - pytorch=2.6.0
-  - torchvision=0.21.0
-  - torchaudio=2.6.0
-
-  # 核心数值和实用库（让 Conda 在这里解决版本）
-  - numpy
-  - pandas
-  - scipy
   - tqdm
   - pip
-
-  # 你列出的基本深度学习库
   - transformers
   - peft
   - accelerate
   - evaluate
-
-  # --- 待以后添加的包（如果不会自动安装）---
-  # 如果 faiss-cpu 在基础环境创建后无法干净安装，
-  # 你可以在这里取消注释，然后尝试 `conda env update -f your_env_file.yml`
-  # - faiss-cpu # 在首次创建环境时保持注释状态
-
-  # Pip 安装的包（如果有任何包是必需且 Conda 中没有的）
-  - pip:
-    # - some_pip_package # pip 包示例
-    - optimum # 通常与 Hugging Face 模型配合使用，通常通过 pip 安装
