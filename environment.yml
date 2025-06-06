@@ -1,7 +1,6 @@
 name: pytorch_env
 channels:
   - conda-forge
-  - pytorch
   - defaults
 dependencies:
 
