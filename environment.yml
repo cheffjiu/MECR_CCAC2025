@@ -1,25 +1,52 @@
 name: pytorch_env
 channels:
-  - conda-forge
-  - defaults
+  - pytorch         # 优先从 PyTorch 官方渠道获取 PyTorch 相关包
+  - nvidia          # NVIDIA 官方渠道，提供 pytorch-cuda 元包和底层 CUDA 依赖
+  - pyg             # 新增：PyTorch Geometric 官方 Conda 渠道
+  - conda-forge     # 广泛的社区维护包（作为 Conda 备份）
+  - defaults        # Anaconda 默认包（作为 Conda 备份）
 dependencies:
+  # Conda 管理的核心依赖和 CUDA 12.4 支持
+  # 这些包由 Conda 负责确保与系统级 CUDA 12.4 的兼容性
+  - python=3.10.17  # 你的 Python 版本
+  - pytorch-cuda=12.4 # 关键：明确指定 PyTorch 依赖 CUDA 12.4 的元包
+  - pytorch=2.6.0
+  - torchvision=0.21.0
+  - torchaudio=2.6.0
+  - pip             # pip 本身作为 Conda 包安装，以便在环境中使用
 
-  - pytorch_geometric
-  - accelerate=1.7.0
-  - datasets=2.14.4
-  - evaluate=0.4.3
-  - faiss-cpu=1.9.0
-  - fastapi=0.115.12
-  - nltk=3.9.1
-  - numpy=1.26.4
-  - pandas=2.2.3
-  - peft=0.15.2
-  - pillow=11.2.1
-  - pip=25.1.1
-  - python=3.10.17
-  - safetensors=0.5.3
-  - tokenizers=0.21.1
-  - tqdm=4.67.1
-  - transformers=4.52.3
-  - pytorch
-  
+  # PyTorch Geometric 及其核心扩展 (现在通过 Conda 安装)
+  # Conda 会负责找到与上面 PyTorch 和 CUDA 12.4 兼容的版本
+  - torch-scatter     # PyG 依赖
+  - torch-sparse      # PyG 依赖
+  - torch-cluster     # PyG 依赖
+  - torch-spline-conv # PyG 依赖
+  - pytorch-geometric # PyG 主包
+
+  # Pip 管理的 Python 库
+  # 这些库不直接耦合特定 CUDA 版本的库
+  pip:
+     
+
+      # 其他你列出的所有通用 Python 库
+      - accelerate==1.7.0
+      - bert_score==0.3.9
+      - datasets==2.14.4
+      - evaluate==0.4.3
+      - faiss-cpu==1.9.0
+      - fastapi==0.115.12
+      - fastapi-cli==0.0.7
+      - huggingface_hub=0.31.4
+      
+      - nltk=3.9.1
+      - numpy=1.26.4
+      - pandas=2.2.3
+      - peft=0.15.2
+      - pillow=11.2.1
+      - safetensors=0.5.3
+      - scipy=1.15.2
+      - tokenizers=0.21.1
+      - tqdm=4.67.1
+      - transformers=4.52.3
+      - yaml=0.2.5
+      
