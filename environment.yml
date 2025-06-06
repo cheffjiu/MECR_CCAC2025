@@ -25,7 +25,7 @@ dependencies:
 
   # Pip 管理的 Python 库
   # 这些库不直接耦合特定 CUDA 版本的库
-  pip:
+pip:
      
 
       # 其他你列出的所有通用 Python 库
