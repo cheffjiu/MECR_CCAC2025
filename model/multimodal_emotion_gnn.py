@@ -83,12 +83,12 @@ class MultimodalEmotionGNN(nn.Module):
         node_t_feats = original_x[:, : self.t_feat_dim]
         node_v_feats = original_x[:, self.t_feat_dim : -1]
         node_v_pos = original_x[:, -1]
-        print(f"node_t_feats: {node_v_pos.shape}")
+        # print(f"node_t_feats: {node_v_pos.shape}")
 
         # 2. 对每个节点的特征进行多模态融合
         # 输入: [N, d_t], [N, d_v] -> 输出: [N, d_fusion]
         fused_node_features = self.fusion_module(node_t_feats, node_v_feats)
-        print(f"fused_node_features: {fused_node_features.shape}")
+        # print(f"fused_node_features: {fused_node_features.shape}")
         # 拼接上位置编码
         fused_node_features = torch.cat([fused_node_features, node_v_pos.unsqueeze(-1)], dim=-1)
         # 映射到GNN输入维度

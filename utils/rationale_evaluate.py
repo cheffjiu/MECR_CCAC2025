@@ -58,6 +58,7 @@ class RationaleEvaluator:
         """
         将JSON格式的rationale转换为评估用文本
         """
+        rationale = json.loads(rationale)
         if "rationale" in rationale and isinstance(rationale["rationale"], dict):
             actual_rationale = rationale["rationale"]
         else:
