@@ -32,7 +32,7 @@ class RationaleEvaluator:
 
         # 尝试直接加载
         try:
-            return self.format_rationale(json.loads(raw_output))
+            return self.format_rationale(raw_output)
         except Exception:
             pass  # json.loads 失败就尝试正则提取
 
@@ -58,7 +58,7 @@ class RationaleEvaluator:
         """
         将JSON格式的rationale转换为评估用文本
         """
-        rationale = json.loads(rationale)
+        
         if "rationale" in rationale and isinstance(rationale["rationale"], dict):
             actual_rationale = rationale["rationale"]
         else:
