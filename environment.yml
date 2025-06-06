@@ -3,7 +3,7 @@ channels:
   - conda-forge 
   - defaults
 dependencies:
- 
+  # Python 和核心包
   - python=3.10
   - tqdm
   - pip

@@ -3,6 +3,9 @@ from typing import List, Dict
 from transformers import AutoTokenizer
 import evaluate
 import nltk
+import re
+
+
 
 class RationaleEvaluator:
     def __init__(
@@ -14,20 +17,46 @@ class RationaleEvaluator:
 
         Args:
             model_name: 用于解码的HuggingFace模型路径
-
         """
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.meteor_metric = evaluate.load("meteor")
         self.bert_metric = evaluate.load("bertscore")
 
-    @staticmethod
-    def format_rationale(rationale: Dict) -> str:
+    def safe_extract_rationale(self, raw_output: str):
+        """
+        尽力从模型输出中提取 rationale 字段中的 stimulus, appraisal, response 文本。
+        即使原始输出不是合法 JSON。
+        """
+        if not raw_output or len(raw_output.strip()) == 0:
+            return ""  # 空字符串
+
+        # 尝试直接加载
+        try:
+            return self.format_rationale(json.loads(raw_output))
+        except Exception:
+            pass  # json.loads 失败就尝试正则提取
+
+        # 使用正则匹配三段内容（兼容中文引号、缩进等格式）
+        stimulus_textual_match = re.search(r'"textual"\s*:\s*["“](.*?)["”]', raw_output)
+        stimulus_visual_match = re.search(r'"visual"\s*:\s*["“](.*?)["”]', raw_output)
+        appraisal_match = re.search(r'"appraisal"\s*:\s*["“](.*?)["”]', raw_output)
+        response_match = re.search(r'"response"\s*:\s*["“](.*?)["”]', raw_output)
+
+        parts = []
+        if stimulus_textual_match:
+            parts.append(stimulus_textual_match.group(1).strip("。"))
+        if stimulus_visual_match and stimulus_visual_match.group(1).strip().lower() != "null":
+            parts.append(stimulus_visual_match.group(1).strip("。"))
+        if appraisal_match:
+            parts.append(appraisal_match.group(1).strip("。"))
+        if response_match:
+            parts.append(response_match.group(1).strip("。"))
+
+        return "。".join(parts) + "。" if parts else ""
+
+    def format_rationale(self, rationale: Dict) -> str:
         """
         将JSON格式的rationale转换为评估用文本
-        Args:
-            rationale (Dict): 包含情感归因信息的字典。
-                              预期结构为 {"rationale": {"stimulus": {...}, "appraisal": "...", "response": "..."}}
-                              或者直接是 {"stimulus": {...}, "appraisal": "...", "response": "..."}
         """
         if "rationale" in rationale and isinstance(rationale["rationale"], dict):
             actual_rationale = rationale["rationale"]
@@ -44,11 +73,10 @@ class RationaleEvaluator:
                     actual_rationale["stimulus"]["textual"].strip("。")
                 )
 
-            # Only append visual if it exists and is not null
             if (
                 "visual" in actual_rationale["stimulus"]
                 and actual_rationale["stimulus"]["visual"]
-                and actual_rationale["stimulus"]["visual"].strip() != "null"
+                and actual_rationale["stimulus"]["visual"].strip().lower() != "null"
             ):
                 stimulus_parts.append(
                     actual_rationale["stimulus"]["visual"].strip("。")
@@ -66,19 +94,15 @@ class RationaleEvaluator:
         if "response" in actual_rationale and actual_rationale["response"]:
             components.append(actual_rationale["response"].strip("。"))
 
-        return "。".join(components) + "。"
+        return "。".join(components) + "。" if components else ""
 
     def compute_metrics(
         self,
-        predictions: List[Dict],  # 现在直接接收已解码的JSON字典列表
-        references: List[Dict],  # 参考的rationale字典
+        predictions: List[Dict],  # 现在直接接收已解码的JSON字典列表或字符串输出
+        references: List[Dict],   # 参考的rationale字典
     ) -> Dict[str, float]:
         """
         计算评估指标
-
-        Args:
-            predictions (List[Dict]): 模型生成的已解码JSON字典列表。
-            references (List[Dict]): 真实的标签rationale字典列表。
 
         Returns:
             {
@@ -87,17 +111,17 @@ class RationaleEvaluator:
                 "score_sum": 排名分数总和 (越小越好)
             }
         """
-        # 预测结果已经是JSON字典，直接格式化为文本
-        pred_texts = [self.format_rationale(p) for p in predictions]
+        pred_texts = [
+            self.safe_extract_rationale(p) if isinstance(p, str) else self.format_rationale(p)
+            for p in predictions
+        ]
         ref_texts = [self.format_rationale(r) for r in references]
 
-        # 计算METEOR
         meteor_result = self.meteor_metric.compute(
             predictions=pred_texts, references=ref_texts
         )
         meteor_score = meteor_result["meteor"]
 
-        # 计算BERTScore
         bert_result = self.bert_metric.compute(
             predictions=pred_texts,
             references=ref_texts,
