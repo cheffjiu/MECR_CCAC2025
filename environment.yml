@@ -1,52 +1,261 @@
 name: pytorch_env
 channels:
-  - pytorch         # 优先从 PyTorch 官方渠道获取 PyTorch 相关包
-  - nvidia          # NVIDIA 官方渠道，提供 pytorch-cuda 元包和底层 CUDA 依赖
-  - pyg             # 新增：PyTorch Geometric 官方 Conda 渠道
-  - conda-forge     # 广泛的社区维护包（作为 Conda 备份）
-  - defaults        # Anaconda 默认包（作为 Conda 备份）
+  - pytorch # 为支持CUDA的PyTorch添加
+  - nvidia/label/cuda-12.4.0 # 为特定CUDA版本添加
+  - conda-forge
+  - defaults
 dependencies:
-  # Conda 管理的核心依赖和 CUDA 12.4 支持
-  # 这些包由 Conda 负责确保与系统级 CUDA 12.4 的兼容性
-  - python=3.10.17  # 你的 Python 版本
-  - pytorch-cuda=12.4 # 关键：明确指定 PyTorch 依赖 CUDA 12.4 的元包
-  - pytorch=2.6.0
-  - torchvision=0.21.0
-  - torchaudio=2.6.0
-  - pip             # pip 本身作为 Conda 包安装，以便在环境中使用
+  # Python 和核心包
+  - python=3.10
+  - pip
+  - certifi
+  - wheel
+  - setuptools
 
-  # PyTorch Geometric 及其核心扩展 (现在通过 Conda 安装)
-  # Conda 会负责找到与上面 PyTorch 和 CUDA 12.4 兼容的版本
-  - torch-scatter     # PyG 依赖
-  - torch-sparse      # PyG 依赖
-  - torch-cluster     # PyG 依赖
-  - torch-spline-conv # PyG 依赖
-  - pytorch-geometric # PyG 主包
+  # 深度学习框架 (CUDA-enabled)
+  - pytorch=2.6.0=cuda12.4_py310_h8980c24_2 # 修改为 CUDA 12.4 版本
+  - torchvision=0.21.0=cuda12.4_py310_hc307cfc_1 # 修改为 CUDA 12.4 版本
+  - accelerate=1.7.0
+  - transformers=4.52.3
+  - peft=0.15.2
+  - safetensors=0.5.3
 
-  # Pip 管理的 Python 库
-  # 这些库不直接耦合特定 CUDA 版本的库
-pip:
-     
+  # 数据处理和科学计算
+  - numpy=1.26.4
+  - pandas=2.2.3
+  - scipy=1.15.2
+  - datasets=2.14.4
+  - pyarrow=20.0.0
+  - fsspec=2025.5.1
+  - joblib=1.5.1
+  - dill=0.3.7
+  - xz # 为liblzma依赖添加
 
-      # 其他你列出的所有通用 Python 库
-      - accelerate==1.7.0
-      - bert_score==0.3.9
-      - datasets==2.14.4
-      - evaluate==0.4.3
-      - faiss-cpu==1.9.0
-      - fastapi==0.115.12
-      - fastapi-cli==0.0.7
-      - huggingface_hub=0.31.4
-      
-      - nltk=3.9.1
-      - numpy=1.26.4
-      - pandas=2.2.3
-      - peft=0.15.2
-      - pillow=11.2.1
-      - safetensors=0.5.3
-      - scipy=1.15.2
-      - tokenizers=0.21.1
-      - tqdm=4.67.1
-      - transformers=4.52.3
-      - yaml=0.2.5
-      
+  # 图像和视频处理 (尽可能确保支持GPU，通常由PyTorch/torchvision处理)
+  - opencv=4.11.0
+  - pillow=11.2.1
+  - ffmpeg=7.1.1 # 保留作为通用工具
+  - pydub=0.25.1
+
+  # Web 和 API 相关
+  - fastapi=0.115.12
+  - uvicorn=0.34.3
+  - httpx=0.28.1
+  - requests=2.32.3
+  - aiohttp=3.11.18
+  - websockets=15.0.1
+  - h11=0.16.0
+  - httpcore=1.0.9
+  - starlette=0.46.2
+
+  # 实用工具和其他库
+  - tqdm=4.67.1
+  - rich=14.0.0
+  - click=8.2.1
+  - pyyaml=6.0.2
+  - packaging=25.0
+  - typing-extensions=4.13.2
+  - regex=2024.11.6
+  - psutil=7.0.0
+  - arrow=1.3.0
+  - ipython # 为服务器上的交互式使用添加
+  - jupyterlab # 为服务器上的交互式使用添加
+  - git # 服务器上最好有
+  - h5py # 深度学习框架常用
+  - protobuf # 常见依赖
+
+  # 你原始列表中普遍有用的特定依赖
+  - faiss=1.9.0=py310h2dd55c0_0_cpu # 暂时保留CPU版本，如果需要可以考虑faiss-gpu
+  - bert_score=0.3.9
+  - evaluate=0.4.3
+  - nltk=3.9.1
+  - qhull=2020.2
+  - pygments=2.19.1
+  - markdown-it-py=2.2.0
+  - mdit-py-plugins=0.3.3
+  - mdurl=0.1.2
+  - linkify-it-py=2.0.3
+  - semantic_version=2.10.0
+  - typer=0.16.0
+  - unicodedata2=16.0.0
+  - xxhash=0.8.3
+  - zstandard=0.23.0
+  - zstd=1.5.7
+  - brotli-python=1.1.0
+  - chardet=5.2.0
+  - charset-normalizer=3.4.2
+  - idna=3.10
+  - pycparser=2.22
+  - cffi=1.17.1
+  - attrs=25.3.0
+  - exceptiongroup=1.3.0
+  - iniconfig=2.0.0
+  - pluggy=1.6.0
+  - jinja2=3.1.6
+  - markupsafe=3.0.2
+  - python-dotenv=1.1.0
+  - python-multipart=0.0.20
+  - python-slugify=8.0.4
+  - email-validator=2.2.0
+  - pydantic=2.11.4
+  - pydantic-core=2.33.2
+  - jsonschema=4.24.0
+  - jsonschema-specifications=2025.4.1
+  - referencing=0.36.2
+  - rpds-py=0.25.1
+  - watchfiles=1.0.5
+  - uvloop=0.21.0
+  - httptools=0.6.4
+  - dnspython=2.7.0
+  - aiofiles=24.1.0
+  - aiohappyeyeballs=2.6.1
+  - aiosignal=1.3.2
+  - async-timeout=5.0.1
+  - frozenlist=1.6.0
+  - multidict=6.4.4
+  - yarl=1.20.0
+  - pytz=2025.2
+  - python-tzdata=2025.2
+  - types-python-dateutil=2.9.0.20250516
+  - zipp=3.21.0
+  - importlib-metadata=8.7.0
+  - importlib_resources=6.5.2
+  - cookiecutter=2.6.0
+  - binaryornot=0.4.4
+  - matplotlib-base=3.10.3
+  - contourpy=1.3.2
+  - cycler=0.12.1
+  - fonttools=4.58.1
+  - kiwisolver=1.4.7
+  - pyparsing=3.2.3
+  - networkx=3.4.2
+  - opencv=4.11.0 # 保持这个，确保OpenCV设置正确
+  - py-opencv=4.11.0
+  - torchvision-extra-decoders=0.0.2
+  - gradio=3.24.1
+  - gradio-client=1.10.2
+  - pytorch_geometric=2.6.1
+  - optree=0.15.0
+  - dataclasses=0.8
+  - propcache=0.3.1
+  - narwhals=1.41.0
+  - munkres=1.1.4
+  - sympy=1.14.0
+  - mpmath=1.3.0
+  - gmp=6.3.0
+  - mpfr=4.2.1
+  - gmpy2=2.2.1
+  - xxhash=0.8.3
+  - python-xxhash=3.5.0
+  - libtorch=2.6.0=cuda12.4_generic_h755bf8d_2 # 修改为 CUDA 12.4 版本
+  # 确保系统基础库由conda处理，如果服务器上没有
+  - glib # 通用GTK依赖
+  - fontconfig # 字体渲染
+  - freetype # 字体渲染
+  - libpng # 图像库
+  - libjpeg-turbo # 图像库
+  - libtiff # 图像库
+  - giflib # 图像库
+  - openjpeg # 图像库
+  - lcms2 # 颜色管理
+  - jasper # 图像库
+  - libwebp-base # WebP 支持
+  - libavif # AVIF 支持
+  - libheif # HEIF 支持
+  - dav1d # AV1 解码器
+  - rav1e # AV1 编码器
+  - svt-av1 # SVT-AV1 编码器
+  - x264 # H.264 编码器
+  - x265 # H.265 编码器
+  - openh264 # H.264 编解码器
+  - lame # MP3 编码器
+  - libogg # Ogg 容器格式
+  - libvorbis # Vorbis 音频编解码器
+  - libopus # Opus 音频编解码器
+  - bzip2 # 压缩
+  - libarchive # 归档工具 (通常是其他包的依赖)
+  - libxml2 # XML 解析
+  - libxslt # XSLT 处理 (通常与libxml2一起)
+  - icu # 国际化
+  - c-ares # 异步DNS
+  - libev # 事件循环
+  - libevent # 事件通知
+  - libuv # 异步I/O
+  - libnghttp2 # HTTP/2
+  - libssh2 # SSH 客户端库
+  - libcurl # 文件传输
+  - openssl # SSL/TLS
+  - krb5 # Kerberos
+  - libedit # Readline 库
+  - ncurses # 终端UI
+  - readline # 命令行编辑
+  - zlib # 压缩
+  - lz4-c # 压缩
+  - snappy # 压缩
+  - zstandard # 压缩
+  - sqlite # 数据库
+  - tbb # Intel TBB
+  - llvm-openmp # OpenMP
+  - libopenblas # 优化BLAS
+  - glog # 日志
+  - gflags # 命令行标志
+  - pugixml # XML 解析器
+  - libthrift # RPC 框架
+  - libre2-11 # 正则表达式库
+  - re2 # 正则表达式库
+  - nlohmann_json # JSON 解析器
+  - grpc-cpp # gRPC C++
+  - abseil-cpp # Abseseil C++
+  - c-ares # 异步DNS
+  - libgrpc # gRPC
+  - libprotobuf # Protobuf
+  - libcrc32c # CRC32C
+  - libgoogle-cloud # Google Cloud C++ 客户端
+  - libgoogle-cloud-storage # Google Cloud Storage C++ 客户端
+  - libopentelemetry-cpp # OpenTelemetry C++
+  - libopentelemetry-cpp-headers # OpenTelemetry C++ 头文件
+  - libpq # PostgreSQL 客户端
+  - libxml2 # XML 处理
+  - libsqlite # SQLite
+  - libiconv # 字符编码转换
+  - libintl # GNU gettext
+  - libasprintf # GNU gettext
+  - libtool # 通用库支持脚本
+  - llvm-tools # LLVM 工具
+  - rust # Rust 编译器 (如果需要编译Rust相关的工具)
+  # - rust-std-x86_64-apple-darwin # 这是Mac特有的Rust标准库，如果GPU服务器不需要请删除
+  - protobuf-compiler # Protobuf 编译器
+  - cmake # 构建系统
+  - ninja # 构建系统
+  - make # 构建系统
+  - automake # 构建系统
+  - autoconf # 构建系统
+  - perl # Perl (通常是构建工具的依赖)
+  - tk # Tk GUI
+  - xorg-libxau # X.Org XAU 库
+  - xorg-libxdmcp # X.Org XDMCP 库
+  - pthread-stubs # pthread 存根
+  - pkg-config # 构建工具
+  - mkl-fft # MKL for FFT
+  - mkl-random # MKL for random
+  - mkl-service # MKL service
+  - nomkl # 确保不请求MKL用于CPU-only (虽然我们正在使用CUDA-enabled)
+
+  # 其他可能需要的系统库和字体
+  - cairo
+  - font-ttf-dejavu-sans-mono
+  - font-ttf-inconsolata
+  - font-ttf-source-code-pro
+  - font-ttf-ubuntu
+  - fonts-conda-ecosystem
+  - fonts-conda-forge
+  - graphite2
+  - harfbuzz
+  - pango
+  - pcre2
+  - pixman
+  - librsvg
+  - libxcb
+  - sdl2
+  - sdl3
+  - libutf8proc
