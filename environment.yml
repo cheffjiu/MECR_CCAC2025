@@ -15,8 +15,7 @@ dependencies:
   - pytorch=2.6.0=cuda12.4_py310* # 指定 PyTorch 版本并强制 CUDA 12.4
   - torchvision=0.21.0=cuda12.4_py310* # 指定 torchvision 版本并强制 CUDA 12.4
   - torchaudio=2.6.0=cuda12.4_py310* # 指定 torchaudio 版本并强制 CUDA 12.4
-  - cudatoolkit=12.4 # 显式安装 CUDA Toolkit
-
+  
   # 注意：torch_geometric 及其相关库通常建议通过 pip 安装预编译的 wheel 包，
   # 以确保与特定 PyTorch 和 CUDA 版本的兼容性。
   # 因此，这些将在 pip 部分处理。
