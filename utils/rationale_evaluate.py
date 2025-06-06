@@ -29,6 +29,7 @@ class RationaleEvaluator:
                               预期结构为 {"rationale": {"stimulus": {...}, "appraisal": "...", "response": "..."}}
                               或者直接是 {"stimulus": {...}, "appraisal": "...", "response": "..."}
         """
+        rationale = json.loads(rationale)
         if "rationale" in rationale and isinstance(rationale["rationale"], dict):
             actual_rationale = rationale["rationale"]
         else:

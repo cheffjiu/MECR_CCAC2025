@@ -57,14 +57,14 @@ class config_dataset_dataloader:
     )
     feature_root_val: str = os.path.join(project_root, "data/feature/val")
     # ===配置dataloader参数===#
-    batch_size: int = 64 # 批大小
-    num_workers: int = 8 # 工作进程数
+    batch_size: int = 8 # 批大小
+    num_workers: int = 4 # 工作进程数
 
 
 @dataclass
 class config_train:
     # ===配置训练参数===#
-    num_train_epochs: int = 1  # 训练轮数
+    num_train_epochs: int = 10  # 训练轮数
     learning_rate: float = 1e-4  # 学习率
     weight_decay: float = 0.01  # 权重衰减
     warmup_ratio: float = 0.05  # 权重衰减

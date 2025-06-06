@@ -65,7 +65,7 @@ class EmotionGraphEncoder(nn.Module):
             h_all (Tensor): 所有节点的图编码特征 (N, out_dim)
         """
         x = data.x
-        print(x.shape)
+        # print(x.shape)
         edge_index = data.edge_index
         edge_attr = data.edge_attr
 
