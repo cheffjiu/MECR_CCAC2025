@@ -6,6 +6,7 @@ pip install accelerate
 pip install evaluate
 pip install peft
 pip install nltk
+pip install bert_score
 pip install faiss-cpu
 
 

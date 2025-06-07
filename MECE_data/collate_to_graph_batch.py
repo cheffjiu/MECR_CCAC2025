@@ -31,6 +31,9 @@ def collate_to_graph_batch(
         # 1. 融合特征
         t_feats = sample["t_feats"]  # shape [N, 768]
         v_feats = sample["v_feats"]  # shape [N, 512]
+        # 转换为bfloat16
+        t_feats = t_feats.to(torch.bfloat16)
+        v_feats = v_feats.to(torch.bfloat16)
         fused_feats = torch.cat([t_feats, v_feats], dim=-1)  # shape [N, 1280]
         # 2. 构图
         graph = build_graph_fn(fused_feats, sample["utterances"])
