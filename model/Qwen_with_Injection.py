@@ -33,7 +33,7 @@ class QwenWithInjection(PreTrainedModel, GenerationMixin):
             gnn_in_dim=self.cfg.gnn_in_dim,
             gnn_hidden_dim=self.cfg.gnn_hidden_dim,
             gnn_out_dim=self.cfg.gnn_out_dim,
-            gnn_heads=self.cfg.gnn_heads,
+            gnn_heads=self.cfg.gnn_num_heads,
             gnn_dropout=self.cfg.gnn_dropout,
         )
 
