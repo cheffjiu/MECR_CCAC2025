@@ -3,5 +3,12 @@ pip install torch_geometric
 pip install pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-2.6.0+cu124.html
 pip install transformers
 pip install accelerate
+pip install evaluate
 pip install peft
+pip install nltk
 pip install faiss-cpu
+
+
+可选：
+如果是多GPU分布训练，请安装deepspeed，命令如下：
+pip install deepspeed

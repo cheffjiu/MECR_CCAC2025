@@ -2,12 +2,15 @@ from transformers import PreTrainedModel, GenerationMixin
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from dataclasses import dataclass
 from typing import Optional, Dict, Any, Tuple, Union
 from transformers.modeling_outputs import CausalLMOutputWithPast
+from multimodal_emotion_gnn import MultimodalEmotionGNN
+from Inject_to_llm import InjectionModule
 
 
 class QwenWithInjection(PreTrainedModel, GenerationMixin):
-    def __init__(self, qwen_model, injection_module):
+    def __init__(self, qwen_model, cfg_model):
         """
         包装 Qwen 模型，实现 GNN 特征注入。
 
@@ -17,10 +20,32 @@ class QwenWithInjection(PreTrainedModel, GenerationMixin):
         """
         super().__init__(qwen_model.config)
         self.config = qwen_model.config
+        self.cfg = cfg_model
+        self.multimodal_emotion_gnn = MultimodalEmotionGNN(
+            #=====融合模块参数初始化=====#
+            t_feat_dim=self.cfg.fusion_d_t,
+            v_feat_dim=self.cfg.fusion_d_v,
+            d_fusion=self.cfg.fusion_d_fusion,
+            fusion_heads=self.cfg.fusion_num_heads,
+            fusion_layers=self.cfg.fusion_num_layers,
+            fusion_dropout=self.cfg.fusion_dropout,
+            #=====GNN参数初始化=====#
+            gnn_in_dim=self.cfg.gnn_in_dim,
+            gnn_hidden_dim=self.cfg.gnn_hidden_dim,
+            gnn_out_dim=self.cfg.gnn_out_dim,
+            gnn_heads=self.cfg.gnn_heads,
+            gnn_dropout=self.cfg.gnn_dropout,
+        )
 
         self.backbone = qwen_model.model
         self.lm_head = qwen_model.lm_head
-        self.injection_module = injection_module
+        self.injection_module = InjectionModule(
+            d_gnn=self.cfg.injection_in_dim,
+            d_model=self.cfg.injection_out_dim,
+            n_heads=self.cfg.injection_num_heads,
+            dropout=self.cfg.injection_dropout,
+        )
+
 
         self.generation_config = qwen_model.generation_config
         self.main_input_name = "input_ids"
@@ -37,7 +62,7 @@ class QwenWithInjection(PreTrainedModel, GenerationMixin):
         self,
         input_ids: torch.LongTensor,
         attention_mask: Optional[torch.Tensor] = None,
-        h_change: Optional[torch.Tensor] = None,
+        batched_graph: Optional[Any] = None,
         labels: Optional[torch.LongTensor] = None,
         past_key_values: Optional[Tuple[Tuple[torch.Tensor]]] = None,
         output_attentions: Optional[bool] = None,
@@ -56,6 +81,12 @@ class QwenWithInjection(PreTrainedModel, GenerationMixin):
             if output_hidden_states is not None
             else self.config.output_hidden_states
         )
+        #获取h_change
+        h_change = None
+        if batched_graph is not None:
+            h_change, _ = self.multimodal_emotion_gnn(batched_graph)
+            # print(f"GNN生成的h_change形状: {h_change.shape}, 类型: {h_change.dtype}")
+
 
         # 主干模型输出
         backbone_outputs = self.backbone(
@@ -122,13 +153,13 @@ class QwenWithInjection(PreTrainedModel, GenerationMixin):
             # 将 input_ids 切片，只保留最后一个 token
             input_ids = input_ids[:, -1:]
 
-        # （可选）可以保留您的打印语句用于调试
+        # （可选）打印语句用于调试
         # print(
         #     f"生成输入准备 (修复后): input_ids={input_ids.shape}, h_change={h_change.shape if h_change is not None else None}"
         # )
 
         return {
-            "input_ids": input_ids,  # 现在这里是正确的输入了
+            "input_ids": input_ids,  
             "past_key_values": past_key_values,
             "attention_mask": attention_mask,
             "h_change": h_change,

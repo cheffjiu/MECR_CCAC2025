@@ -55,30 +55,7 @@ class Trainer:
             cfg.cfg_dataset_dataloader.tokenizer_name, trust_remote_code=True
         )
 
-        # 3. 初始化模块
-        self.multimodal_emotion_gnn = MultimodalEmotionGNN(
-            # =====特征融合模块参数=====#
-            t_feat_dim=cfg.cfg_feature_fusion_model.d_t,
-            v_feat_dim=cfg.cfg_feature_fusion_model.d_v,
-            d_fusion=cfg.cfg_feature_fusion_model.d_fusion,
-            fusion_heads=cfg.cfg_feature_fusion_model.num_heads,
-            fusion_layers=cfg.cfg_feature_fusion_model.num_layers,
-            fusion_dropout=cfg.cfg_feature_fusion_model.dropout,
-            # =====GNN模块参数=====#
-            gnn_in_dim=cfg.cfg_emotion_graph_model.gnn_in_dim,
-            gnn_hidden_dim=cfg.cfg_emotion_graph_model.gnn_hidden_dim,
-            gnn_out_dim=cfg.cfg_emotion_graph_model.gnn_out_dim,
-            gnn_heads=cfg.cfg_emotion_graph_model.num_heads,
-            gnn_dropout=cfg.cfg_emotion_graph_model.dropout,
-        )
-
-        self.injection_module = InjectionModule(
-            d_gnn=cfg.cfg_injection_module.d_gnn,
-            d_model=cfg.cfg_injection_module.d_model,
-            n_heads=cfg.cfg_injection_module.n_heads,
-            dropout=cfg.cfg_injection_module.dropout,
-        )
-
+        # 3. 初始化模型
         qwen_base_model = AutoModelForCausalLM.from_pretrained(
             cfg.cfg_qwen_llm.llm_name,
             torch_dtype=torch.float32,
@@ -87,7 +64,7 @@ class Trainer:
 
         self.model = QwenWithInjection(
             qwen_base_model,
-            self.injection_module,
+            self.config.cfg_model,
         )
 
         # --- LoRA Configuration for lm_head ---
@@ -123,68 +100,48 @@ class Trainer:
 
         self.train_dataloader = DataLoader(
             self.train_dataset,
-            batch_size=6,
+            batch_size=self.config.cfg_dataset_dataloader.batch_size,
             shuffle=True,
             collate_fn=CustomCollate(             
                 build_emotion_graph
             ),
-            num_workers=cfg.cfg_dataset_dataloader.num_workers,
+            num_workers=self.config.cfg_dataset_dataloader.num_workers,
             pin_memory=True,
         )
         self.eval_dataloader = DataLoader(
             self.eval_dataset,
-            batch_size=6,
+            batch_size=self.config.cfg_dataset_dataloader.batch_size,
             shuffle=False,
             collate_fn=CustomCollate(
                 build_emotion_graph
             ),
-            num_workers=cfg.cfg_dataset_dataloader.num_workers,
+            num_workers=self.config.cfg_dataset_dataloader.num_workers,
             pin_memory=True,
         )
 
-        # 5. 优化器和学习率调度器
+        # 5. 优化器和学习率调度器数
         no_decay = ["bias", "LayerNorm.weight"]
-        # --- 重要：包含所有可训练模型的参数 ---
-        # 如果你打算训练 multimodal_emotion_gnn，请确保其参数也包含在 optimizer_grouped_parameters 中。
-        # 否则，如果它是一个固定的特征提取器，则无需将其参数放入优化器。
-
-        # 收集 self.model (QwenWithInjection + LoRA) 的参数
-        model_params = [
-            p
-            for n, p in self.model.named_parameters()
-            if not any(nd in n for nd in no_decay) and p.requires_grad
-        ]
-        model_no_decay_params = [
-            p
-            for n, p in self.model.named_parameters()
-            if any(nd in n for nd in no_decay) and p.requires_grad
-        ]
-
-        # 收集 self.multimodal_emotion_gnn 的参数
-        multimodal_gnn_params = [
-            p
-            for n, p in self.multimodal_emotion_gnn.named_parameters()
-            if not any(nd in n for nd in no_decay) and p.requires_grad
-        ]
-        multimodal_gnn_no_decay_params = [
-            p
-            for n, p in self.multimodal_emotion_gnn.named_parameters()
-            if any(nd in n for nd in no_decay) and p.requires_grad
-        ]
-
+        # 只需收集 self.model (QwenWithInjection，它现在包含了所有子模块) 的参数
         optimizer_grouped_parameters = [
             {
-                "params": model_params + multimodal_gnn_params,
+                "params": [
+                    p for n, p in self.model.named_parameters() 
+                    if not any(nd in n for nd in no_decay) and p.requires_grad
+                ],
                 "weight_decay": cfg.cfg_train.weight_decay,
             },
             {
-                "params": model_no_decay_params + multimodal_gnn_no_decay_params,
+                "params": [
+                    p for n, p in self.model.named_parameters() # <--- 只需要遍历 self.model
+                    if any(nd in n for nd in no_decay) and p.requires_grad
+                ],
                 "weight_decay": 0.0,
             },
         ]
         self.optimizer = torch.optim.AdamW(
             optimizer_grouped_parameters, lr=cfg.cfg_train.learning_rate
         )
+
 
         num_training_steps = len(self.train_dataloader) * cfg.cfg_train.num_train_epochs
         num_warmup_steps = int(num_training_steps * cfg.cfg_train.warmup_ratio)
@@ -195,17 +152,14 @@ class Trainer:
         )
 
         # 6. 使用 accelerator.prepare() 包装所有组件
-        # 分别准备每个模型
-        self.model = self.accelerator.prepare(self.model)
-        self.multimodal_emotion_gnn = self.accelerator.prepare(self.multimodal_emotion_gnn)
-
-        # 优化器、数据加载器和调度器一起准备
         (
+            self.model,
             self.optimizer,
             self.train_dataloader,
             self.eval_dataloader,
             self.lr_scheduler,
         ) = self.accelerator.prepare(
+            self.model,
             self.optimizer,
             self.train_dataloader,
             self.eval_dataloader,
@@ -259,14 +213,11 @@ class Trainer:
             labels = encoded_labels["input_ids"]
             labels = torch.where(labels == self.tokenizer.pad_token_id, -100, labels)
             # print(f"Shape of labels after tokenization and masking: {labels.shape}")
-            # GNN 前向传播
-            h_change, _ = self.multimodal_emotion_gnn(batched_graph)
-
             # 模型前向传播
             outputs = self.model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
-                h_change=h_change,
+                batched_graph=batched_graph,
                 labels=labels,
             )
             loss = outputs.loss
@@ -337,14 +288,11 @@ class Trainer:
                     labels = torch.where(
                         labels == self.tokenizer.pad_token_id, -100, labels
                     )
-                    # GNN 前向传播,获取 h_change
-                    h_change, _ = self.multimodal_emotion_gnn(batched_graph)
-
                     # 计算损失
                     outputs = self.model(
                         input_ids=input_ids,
                         attention_mask=attention_mask,
-                        h_change=h_change,
+                        batched_graph=batched_graph,
                         labels=labels,
                     )
                     all_loss.append(outputs["loss"].item())
@@ -355,41 +303,39 @@ class Trainer:
                     generated_ids = unwrapped_model.generate(
                         input_ids=input_ids,
                         attention_mask=attention_mask,
-                        h_change=h_change,
+                        batched_graph=batched_graph,
                         max_new_tokens=256,
                         num_beams=1,
                         do_sample=False,
                         pad_token_id=self.tokenizer.eos_token_id,
                     )
 
-                    all_predictions_ids.extend(generated_ids)
+                    all_predictions_ids.extend(generated_ids.cpu())
 
                 else:  # 测试模式只生成预测
                     # 编码 prompt 输入
                     encoded_inputs = self.tokenizer(
                         prompt_texts,
                         return_tensors="pt",
-                        padding="longest",
+                        padding="max_length",
                         truncation=True,
                         max_length=512,
                     ).to(self.device)
                     input_ids = encoded_inputs["input_ids"]
                     attention_mask = encoded_inputs["attention_mask"]
-                    # GNN 前向传播，获取 h_change
-                    h_change, _ = self.emotion_graph_encoder(batched_graph)
                     # 解除accelerator的包装,避免分布式问题
                     unwrapped_model = self.accelerator.unwrap_model(self.model)
                     # 生成预测tokens_ids
                     generated_ids = unwrapped_model.generate(
                         input_ids=input_ids,
                         attention_mask=attention_mask,
-                        h_change=h_change,
+                        batched_graph=batched_graph,
                         max_new_tokens=256,
                         num_beams=1,
                         do_sample=False,
                         pad_token_id=self.tokenizer.eos_token_id,
                     )
-                    all_predictions_ids.extend(generated_ids.cpu)
+                    all_predictions_ids.extend(generated_ids.cpu())
 
         # 在所有进程上收集结果
         all_predictions_gathered = self.accelerator.gather_for_metrics(
@@ -424,10 +370,8 @@ class Trainer:
             return metrics
 
     def train(self):
-        # 初始化一个变量来跟踪是否开始验证和保存
-        # 可以在 Trainer 类的 __init__ 方法中初始化 self.start_validation_epoch = 3
-        # 这里为了演示直接使用硬编码的 3
-        start_validation_epoch = 3 
+        
+        start_validation_epoch = self.config.cfg_train.start_validation_epoch # 从配置中获取起始验证 epoch
 
         for epoch in range(self.config.cfg_train.num_train_epochs):
             if self.accelerator.is_main_process:
@@ -437,47 +381,47 @@ class Trainer:
             if self.accelerator.is_main_process:
                 print(f"训练损失: {train_loss:.4f}")
 
-            # --- 条件判断：从第三个 epoch (索引为 2) 开始进行验证和保存 ---
+            # --- 条件判断：从指定 epoch 开始进行验证和保存 ---
             if (epoch + 1) >= start_validation_epoch:
-                if self.accelerator.is_main_process:  # 确保只在主进程保存
+                # 每个 Epoch 结束时保存一次模型 (主进程)
+                if self.accelerator.is_main_process:  
                     epoch_save_dir = os.path.join(self.output_dir, f"epoch_{epoch + 1}")
                     os.makedirs(epoch_save_dir, exist_ok=True)
 
-                    # 1. 解包所有经过 accelerator.prepare 包装过的模块
-                    unwrapped_llm_model = self.accelerator.unwrap_model(self.model)
-                    unwrapped_gnn_model = self.accelerator.unwrap_model(self.multimodal_emotion_gnn)
+                    # 1. 解包所有经过 accelerator.prepare 包装过的主模型
+                    unwrapped_model = self.accelerator.unwrap_model(self.model)
 
-                    # 2. 保存 LoRA 适配器
-                    # PeftModel 的 save_pretrained 方法会保存 LoRA 相关的权重和配置
+                    # 2. 保存 LoRA 适配器 (QwenWithInjection 是 PeftModel 的实例)
                     print(f"保存 LoRA 适配器到 {epoch_save_dir}/lora_adapters...")
-                    unwrapped_llm_model.save_pretrained(os.path.join(epoch_save_dir, "lora_adapters"))
+                    unwrapped_model.save_pretrained(os.path.join(epoch_save_dir, "lora_adapters"))
 
-                    # 3. 保存 InjectionModule 的参数
-                    # InjectionModule 是 QwenWithInjection 的一个子模块
-                    # 需要明确保存其 state_dict
+                    # 3. 保存 InjectionModule 的参数 (通过主模型访问其子模块)
                     print(
                         f"保存 InjectionModule 参数到 {epoch_save_dir}/injection_module.pt..."
                     )
                     torch.save(
-                        unwrapped_llm_model.injection_module.state_dict(),
+                        unwrapped_model.injection_module.state_dict(),
                         os.path.join(epoch_save_dir, "injection_module.pt"),
                     )
 
-                    # 4. 保存 MultimodalEmotionGNN 的参数
-                    # MultimodalEmotionGNN 是一个独立的模型，保存其 state_dict
+                    # 4. 保存 MultimodalEmotionGNN 的参数 (通过主模型访问其子模块)
                     print(f"保存 MultimodalEmotionGNN 参数到 {epoch_save_dir}/multimodal_emotion_gnn.pt...")
                     torch.save(
-                        unwrapped_gnn_model.state_dict(),
+                        unwrapped_model.multimodal_emotion_gnn.state_dict(),
                         os.path.join(epoch_save_dir, "multimodal_emotion_gnn.pt"),
                     )
+                    print(f"模型组件已保存到 {epoch_save_dir}")
 
-                # --- 每个 Epoch 结束时的模型保存逻辑结束 ---
+                # **等待所有进程同步，然后进行评估**
+                self.accelerator.wait_for_everyone() 
 
                 eval_metrics = self._evaluate()
+                
+                # 只有主进程处理评估结果和早停逻辑
                 if self.accelerator.is_main_process:
                     print(f"验证指标: {eval_metrics}")
 
-                    current_eval_score = eval_metrics.get("score_sum", float("-inf"))
+                    current_eval_score = eval_metrics.get("score_sum", float("-inf")) # 假设 score_sum 是你的主要评估指标
 
                     if current_eval_score > self.best_eval_score + self.min_delta:
                         print(
@@ -491,19 +435,18 @@ class Trainer:
                         os.makedirs(best_model_save_dir, exist_ok=True)
 
                         # 再次解包确保获取当前最佳模型的未包装版本
-                        unwrapped_llm_model = self.accelerator.unwrap_model(self.model)
-                        unwrapped_gnn_model = self.accelerator.unwrap_model(self.multimodal_emotion_gnn)
+                        unwrapped_model = self.accelerator.unwrap_model(self.model)
 
                         # 1. 保存最佳 LoRA 适配器
                         print(f"保存最佳 LoRA 适配器到 {best_model_save_dir}/lora_adapters...")
-                        unwrapped_llm_model.save_pretrained(os.path.join(best_model_save_dir, "lora_adapters"))
+                        unwrapped_model.save_pretrained(os.path.join(best_model_save_dir, "lora_adapters"))
 
                         # 2. 保存最佳 InjectionModule 的参数
                         print(
                             f"保存最佳 InjectionModule 参数到 {best_model_save_dir}/injection_module.pt..."
                         )
                         torch.save(
-                            unwrapped_llm_model.injection_module.state_dict(),
+                            unwrapped_model.injection_module.state_dict(),
                             os.path.join(best_model_save_dir, "injection_module.pt"),
                         )
 
@@ -512,9 +455,10 @@ class Trainer:
                             f"保存最佳 MultimodalEmotionGNN 参数到 {best_model_save_dir}/multimodal_emotion_gnn.pt..."
                         )
                         torch.save(
-                            unwrapped_gnn_model.state_dict(),
+                            unwrapped_model.multimodal_emotion_gnn.state_dict(),
                             os.path.join(best_model_save_dir, "multimodal_emotion_gnn.pt"),
                         )
+                        print(f"最佳模型组件已保存到：{best_model_save_dir}")
 
                     else:
                         self.epochs_no_improve += 1
@@ -530,10 +474,11 @@ class Trainer:
                 if self.accelerator.is_main_process:
                     print(f"Epoch {epoch + 1}：跳过验证和模型保存。")
 
-            self.accelerator.wait_for_everyone() # 等待所有进程完成当前 epoch
+            # 在每个 epoch 结束时等待所有进程同步，即使不进行验证
+            self.accelerator.wait_for_everyone()
 
         if self.accelerator.is_main_process:
             print("训练结束。")
             print(
-                f"最佳模型所有组件已保存到：{os.path.join(self.output_dir, 'best_model')}"
+                f"最终最佳模型所有组件已保存到：{os.path.join(self.output_dir, 'best_model')}"
             )

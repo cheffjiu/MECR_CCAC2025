@@ -7,36 +7,28 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(current_file_path)))
 
 
 @dataclass
-class config_feature_fusion_model:
-    d_t: int = 768  # 文本特征维度
-    d_v: int = 512  # 视频特征维度
-    d_fusion: int = 256  # 融合特征维度
-    num_heads: int = 4  # 多头注意力头数
-    num_layers: int = 2  # 交叉注意力层数
-    dropout: float = 0.1  # 丢弃率
-
-
-@dataclass
-class config_emotion_graph_model:
-    gnn_in_dim: int = 256 # GNN输入维度=融合特征维度+1(位置编码)
+class config_model:
+    #===融合模块参数配置====#
+    fusion_d_t: int = 768  # 文本特征维度
+    fusion_d_v: int = 512  # 视频特征维度
+    fusion_d_fusion: int = 256  # 融合特征维度
+    fusion_num_heads: int = 4  # 多头注意力头数
+    fusion_num_layers: int = 2  # 交叉注意力层数
+    fusion_dropout: float = 0.1  # 丢弃率
+    #===GNN参数配置====#
+    gnn_in_dim: int = 256 # GNN输入维度
     gnn_hidden_dim: int = 256  # GNN隐藏层维度
     gnn_out_dim: int = 256  # GNN输出维度
-    num_heads: int = 4  # GNN多头注意力头数
-    dropout: float = 0.1  # 丢弃率
-
-
-@dataclass
-class config_injection_module:
-    d_gnn: int = 1024  # GNN输出维度
-    d_model: int = 1024  # LLM模型输出维度
-    n_heads: int = 4  # 多头注意力头数
-    dropout: float = 0.1  # 丢弃率
-
-
-@dataclass
-class config_qwen_llm:
+    gnn_num_heads: int = 4  # GNN多头注意力头数
+    gnn_dropout: float = 0.1  # 丢弃率
+    #===LLM注入模块参数配置====#
+    injection_in_dim: int = 1024  # GNN输出维度
+    injection_out_dim: int = 1024  # LLM模型输出维度
+    injection_num_heads: int = 4  # 多头注意力头数
+    injection_dropout: float = 0.1  # 丢弃率
+    #===LLM参数配置====#
     llm_name: str = "Qwen/Qwen3-0.6B"  # 模型名称或路径
-
+    
 
 @dataclass
 class config_dataset_dataloader:
@@ -73,7 +65,8 @@ class config_train:
     # ===早停参数===#
     patience: int = 5  # 早停轮数
     min_delta: float = 0.001  # 早停最小变化
-    # ===配置模型保存路径===#
+    # ===配置模型保存===#
+    start_validation_epoch: int = 1 # 开始验证的轮数
     model_save_path: str = os.path.join(
         project_root, "checkpoints", "model.pth"
     )  # 模型保存路径
@@ -88,10 +81,7 @@ class config_lora:
 
 @dataclass
 class config:
-    cfg_feature_fusion_model: config_feature_fusion_model
-    cfg_emotion_graph_model: config_emotion_graph_model
-    cfg_injection_module: config_injection_module
-    cfg_qwen_llm: config_qwen_llm
+    cfg_model: config_model
     cfg_dataset_dataloader: config_dataset_dataloader
     cfg_train: config_train
     cfg_lora: config_lora
