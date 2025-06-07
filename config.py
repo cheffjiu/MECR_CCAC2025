@@ -61,7 +61,17 @@ class config_train:
     weight_decay: float = 0.01  # 权重衰减
     warmup_ratio: float = 0.05  # 权重衰减
     accumulation_steps: int = 1  # 梯度累积步数
-    max_grad_norm: float = 1.0  # 梯度裁剪阈值
+    max_grad_norm: float = 1.0  # 梯度裁剪阈#
+    # === 生成参数 ===
+    # 针对情感回应生成，我们通常希望回应既有创造性又不过于离谱，避免重复
+    max_new_tokens: int = 80 # 根据情感回应的典型长度调整，例如 80-120 词
+    num_beams: int = 1        # 采样模式下通常设为1，不使用束搜索
+    do_sample: bool = True    # 启用采样，增加回应多样性
+
+    temperature: float = 0.8  # 略低于1，确保一定随机性但不过于发散
+    top_p: float = 0.9        # 常用且效果好的 Top-P 值，在保证质量的同时增加多样性
+    top_k: int = 0            # 与 top_p 配合使用时，通常设为0
+    repetition_penalty: float = 1.2 # 适度惩罚重复，防止回应过于机械或陷入循环
     # ===早停参数===#
     patience: int = 5  # 早停轮数
     min_delta: float = 0.001  # 早停最小变化

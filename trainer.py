@@ -303,11 +303,18 @@ class Trainer:
                     generated_ids = unwrapped_model.generate(
                         input_ids=input_ids,
                         attention_mask=attention_mask,
-                        batched_graph=batched_graph,
-                        max_new_tokens=256,
-                        num_beams=1,
-                        do_sample=False,
-                        pad_token_id=self.tokenizer.eos_token_id,
+                        batched_graph=batched_graph, # <-- GNN 输入，传递给 QwenWithInjection.forward
+                        pad_token_id=self.tokenizer.eos_token_id, # 通常设为 EOS token ID
+
+                        # === 从配置中读取并应用的生成参数 ===
+                        max_new_tokens=self.config.cfg_train.max_new_tokens,
+                        num_beams=self.config.cfg_train.num_beams,
+                        do_sample=self.config.cfg_train.do_sample,
+                        temperature=self.config.cfg_train.temperature,
+                        top_p=self.config.cfg_train.top_p,
+                        top_k=self.config.cfg_train.top_k,
+                        repetition_penalty=self.config.cfg_train.repetition_penalty,
+                        # ==================================
                     )
 
                     all_predictions_ids.extend(generated_ids.cpu())
@@ -329,11 +336,18 @@ class Trainer:
                     generated_ids = unwrapped_model.generate(
                         input_ids=input_ids,
                         attention_mask=attention_mask,
-                        batched_graph=batched_graph,
-                        max_new_tokens=256,
-                        num_beams=1,
-                        do_sample=False,
-                        pad_token_id=self.tokenizer.eos_token_id,
+                        batched_graph=batched_graph, 
+                        pad_token_id=self.tokenizer.eos_token_id, # 通常设为 EOS token ID
+
+                        # === 从配置中读取并应用的生成参数 ===
+                        max_new_tokens=self.config.cfg_train.max_new_tokens,
+                        num_beams=self.config.cfg_train.num_beams,
+                        do_sample=self.config.cfg_train.do_sample,
+                        temperature=self.config.cfg_train.temperature,
+                        top_p=self.config.cfg_train.top_p,
+                        top_k=self.config.cfg_train.top_k,
+                        repetition_penalty=self.config.cfg_train.repetition_penalty,
+                        
                     )
                     all_predictions_ids.extend(generated_ids.cpu())
 
