@@ -52,12 +52,12 @@ class Trainer:
 
         # 2. Tokenizer
         self.tokenizer = AutoTokenizer.from_pretrained(
-            cfg.cfg_dataset_dataloader.tokenizer_name, trust_remote_code=True
+            self.config.cfg_dataset_dataloader.tokenizer_name, trust_remote_code=True
         )
 
         # 3. 初始化模型
         qwen_base_model = AutoModelForCausalLM.from_pretrained(
-            cfg.cfg_qwen_llm.llm_name,
+            self.config.cfg_model.llm_name,
             torch_dtype=torch.float32,
             trust_remote_code=True,
         )
@@ -84,18 +84,18 @@ class Trainer:
 
         # 4. 数据集和数据加载器
         self.train_dataset = MECRDataset(
-            json_path=cfg.cfg_dataset_dataloader.json_path_train,
-            feature_root=cfg.cfg_dataset_dataloader.feature_root_train,
+            json_path=self.config.cfg_dataset_dataloader.json_path_train,
+            feature_root=self.config.cfg_dataset_dataloader.feature_root_train,
             mode="train",
-            tokenizer=cfg.cfg_dataset_dataloader.tokenizer_name,
-            bert_model=cfg.cfg_dataset_dataloader.bert_name,
+            tokenizer=self.config.cfg_dataset_dataloader.tokenizer_name,
+            bert_model=self.config.cfg_dataset_dataloader.bert_name,
         )
         self.eval_dataset = MECRDataset(
-            json_path=cfg.cfg_dataset_dataloader.json_path_val,
-            feature_root=cfg.cfg_dataset_dataloader.feature_root_val,
+            json_path=self.config.cfg_dataset_dataloader.json_path_val,
+            feature_root=self.config.cfg_dataset_dataloader.feature_root_val,
             mode="val",
-            tokenizer=cfg.cfg_dataset_dataloader.tokenizer_name,
-            bert_model=cfg.cfg_dataset_dataloader.bert_name,
+            tokenizer=self.config.cfg_dataset_dataloader.tokenizer_name,
+            bert_model=self.config.cfg_dataset_dataloader.bert_name,
         )
 
         self.train_dataloader = DataLoader(
@@ -128,23 +128,23 @@ class Trainer:
                     p for n, p in self.model.named_parameters() 
                     if not any(nd in n for nd in no_decay) and p.requires_grad
                 ],
-                "weight_decay": cfg.cfg_train.weight_decay,
+                "weight_decay": self.config.cfg_train.weight_decay,
             },
             {
                 "params": [
                     p for n, p in self.model.named_parameters() # <--- 只需要遍历 self.model
                     if any(nd in n for nd in no_decay) and p.requires_grad
                 ],
-                "weight_decay": 0.0,
+                "weight_decay": self.config.cfg_train.weight_decay,
             },
         ]
         self.optimizer = torch.optim.AdamW(
-            optimizer_grouped_parameters, lr=cfg.cfg_train.learning_rate
+            optimizer_grouped_parameters, lr=self.config.cfg_train.learning_rate
         )
 
 
-        num_training_steps = len(self.train_dataloader) * cfg.cfg_train.num_train_epochs
-        num_warmup_steps = int(num_training_steps * cfg.cfg_train.warmup_ratio)
+        num_training_steps = len(self.train_dataloader) * self.config.cfg_train.num_train_epochs
+        num_warmup_steps = int(num_training_steps * self.config.cfg_train.warmup_ratio)
         self.lr_scheduler = get_linear_schedule_with_warmup(
             self.optimizer,
             num_warmup_steps=num_warmup_steps,
@@ -167,14 +167,14 @@ class Trainer:
         )
 
         # 7. 评估器
-        self.evaluator = RationaleEvaluator(model_name=cfg.cfg_qwen_llm.llm_name)
+        self.evaluator = RationaleEvaluator(model_name=self.config.cfg_model.llm_name)
 
         # 8. 早停机制
         self.best_eval_score = float("-inf")
         self.epochs_no_improve = 0
-        self.patience = cfg.cfg_train.patience
-        self.min_delta = cfg.cfg_train.min_delta
-        self.output_dir = cfg.cfg_train.model_save_path
+        self.patience = self.config.cfg_train.patience
+        self.min_delta = self.config.cfg_train.min_delta
+        self.output_dir = self.config.cfg_train.model_save_path
         os.makedirs(self.output_dir, exist_ok=True)
         self.best_model_path = os.path.join(self.output_dir, "best_model.pt")
 
