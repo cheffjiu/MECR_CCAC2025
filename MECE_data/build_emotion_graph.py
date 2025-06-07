@@ -96,12 +96,12 @@ def build_emotion_graph(fused_feats, utterances):
     # === 边属性 === 形状为[M, 1]，M为边的总数
     edge_attr = torch.cat(
         [
-            torch.zeros(seq_edges.size(1), 1, device=device),  # 顺序边：0
-            torch.ones(same_spk_edges.size(1), 1, device=device),  # 同speaker边：1
+            torch.zeros(seq_edges.size(1), 1, device=device,dtype=torch.bfloat16),  # 顺序边：0
+            torch.ones(same_spk_edges.size(1), 1, device=device,dtype=torch.bfloat16),  # 同speaker边：1
             torch.full(
-                (switch_edges.size(1), 1), 2.0, device=device
+                (switch_edges.size(1), 1), 2.0, device=device,dtype=torch.bfloat16
             ),  # 说话人切换边：2
-            torch.full((super_edges.size(1), 1), 3.0, device=device),  # 超级节点边：3
+            torch.full((super_edges.size(1), 1), 3.0, device=device,dtype=torch.bfloat16),  # 超级节点边：3
         ],
         dim=0,
     )

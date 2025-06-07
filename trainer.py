@@ -85,7 +85,7 @@ class Trainer:
         # 4. 数据集和数据加载器
         self.train_dataset = MECRDataset(
             json_path=self.config.cfg_dataset_dataloader.json_path_train,
-            feature_root=self.config.cfg_dataset_dataloader.feature_root_train,
+            feature_root=self.config.cfg_dataset_dataloader.feature_root_trian,
             mode="train",
             tokenizer=self.config.cfg_dataset_dataloader.tokenizer_name,
             bert_model=self.config.cfg_dataset_dataloader.bert_name,
