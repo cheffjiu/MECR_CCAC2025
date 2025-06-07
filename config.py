@@ -56,11 +56,11 @@ class config_dataset_dataloader:
 @dataclass
 class config_train:
     # ===配置训练参数===#
-    num_train_epochs: int = 10  # 训练轮数
-    learning_rate: float = 1e-4  # 学习率
+    num_train_epochs: int = 50  # 训练轮数
+    learning_rate: float = 3e-4  # 学习率
     weight_decay: float = 0.01  # 权重衰减
     warmup_ratio: float = 0.05  # 权重衰减
-    accumulation_steps: int = 1  # 梯度累积步数
+    accumulation_steps: int = 2  # 梯度累积步数
     max_grad_norm: float = 1.0  # 梯度裁剪阈#
     # === 生成参数 ===
     # 针对情感回应生成，我们通常希望回应既有创造性又不过于离谱，避免重复
@@ -76,7 +76,7 @@ class config_train:
     patience: int = 5  # 早停轮数
     min_delta: float = 0.001  # 早停最小变化
     # ===配置模型保存===#
-    start_validation_epoch: int = 1 # 开始验证的轮数
+    start_validation_epoch: int = 25 # 开始验证的轮数
     model_save_path: str = os.path.join(
         project_root, "checkpoints", "model.pth"
     )  # 模型保存路径

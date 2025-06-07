@@ -32,7 +32,7 @@ class RationaleEvaluator:
 
         # 尝试直接加载
         try:
-            return self.format_rationale(raw_output)
+            return self.format_rationale(json.loads(raw_output)) # 这里也尝试解析一下
         except Exception:
             pass  # json.loads 失败就尝试正则提取
 
@@ -58,7 +58,23 @@ class RationaleEvaluator:
         """
         将JSON格式的rationale转换为评估用文本
         """
-        
+        # --- DEBUG PRINT ---
+        print("\n--- DEBUG: In format_rationale ---")
+        print(f"Input 'rationale' type: {type(rationale)}")
+        print(f"Input 'rationale' content (first 200 chars or full if dict): {str(rationale)[:200] if isinstance(rationale, str) else rationale}")
+        # --- END DEBUG ---
+
+        # 核心逻辑：确保 rationale 变量是字典
+        if isinstance(rationale, str):
+            # 如果 rationale 仍然是一个字符串，说明之前的处理没有成功，
+            # 或者它是一个模型生成的原始字符串（非JSON），需要特殊处理。
+            # 这里简单返回字符串本身，或者进行更复杂的解析（如safe_extract_rationale）
+            # 但为了避免递归循环，我们应该避免再次尝试 json.loads
+            # 如果期望它是JSON，那么之前的 json.loads 应该成功了。
+            # 如果走到这里是字符串，那它可能就是 plain text。
+            print("DEBUG: format_rationale received a string, which is unexpected for direct dictionary access.")
+            return self.safe_extract_rationale(rationale) # 尝试用 safe_extract_rationale 处理
+
         if "rationale" in rationale and isinstance(rationale["rationale"], dict):
             actual_rationale = rationale["rationale"]
         else:
@@ -94,8 +110,13 @@ class RationaleEvaluator:
 
         if "response" in actual_rationale and actual_rationale["response"]:
             components.append(actual_rationale["response"].strip("。"))
-
-        return "。".join(components) + "。" if components else ""
+        
+        final_text = "。".join(components) + "。" if components else ""
+        # --- DEBUG PRINT ---
+        print(f"DEBUG: Formatted rationale output: {final_text[:200]}...")
+        print("--- END DEBUG: In format_rationale ---\n")
+        # --- END DEBUG ---
+        return final_text
 
     def compute_metrics(
         self,
@@ -112,11 +133,34 @@ class RationaleEvaluator:
                 "score_sum": 排名分数总和 (越小越好)
             }
         """
+        # --- DEBUG PRINT ---
+        print("\n--- DEBUG: In compute_metrics ---")
+        print(f"Input predictions type: {type(predictions)}")
+        if len(predictions) > 0:
+            print(f"predictions[0] type: {type(predictions[0])}")
+            print(f"predictions[0] content: {predictions[0][:200] if isinstance(predictions[0], str) else predictions[0]}")
+        print(f"Input references type: {type(references)}")
+        if len(references) > 0:
+            print(f"references[0] type: {type(references[0])}")
+            print(f"references[0] content: {references[0]}")
+        # --- END DEBUG ---
+
+        # 预测文本的处理：如果预测是字符串，尝试用 safe_extract_rationale，否则直接用 format_rationale
         pred_texts = [
             self.safe_extract_rationale(p) if isinstance(p, str) else self.format_rationale(p)
             for p in predictions
         ]
-        ref_texts = [self.format_rationale(r) for r in references]
+        # 参考文本的处理：确保 references 已经是字典列表
+        ref_texts = [self.format_rationale(r) for r in references] # 这里的 r 应该是字典了
+
+        # --- DEBUG PRINT ---
+        print(f"DEBUG: After processing in compute_metrics:")
+        if len(pred_texts) > 0:
+            print(f"DEBUG: pred_texts[0] type: {type(pred_texts[0])}, content: {pred_texts[0][:200]}...")
+        if len(ref_texts) > 0:
+            print(f"DEBUG: ref_texts[0] type: {type(ref_texts[0])}, content: {ref_texts[0][:200]}...")
+        print("--- END DEBUG: In compute_metrics ---\n")
+        # --- END DEBUG ---
 
         meteor_result = self.meteor_metric.compute(
             predictions=pred_texts, references=ref_texts
@@ -136,7 +180,6 @@ class RationaleEvaluator:
             "bert_score": round(bert_f1, 4),
             "score_sum": round(meteor_score + bert_f1, 4),
         }
-
 
 # test_rationale = RationaleEvaluator(model_name="Qwen/Qwen3-0.6B")
 # data = {

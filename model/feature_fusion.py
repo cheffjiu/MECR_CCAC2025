@@ -44,7 +44,7 @@ class CrossModalAttention(nn.Module):
         self.num_heads = num_heads
         self.num_layers = num_layers
         self.dropout = dropout
-
+        
         # 文本、视觉投影
         self.text_proj = nn.Sequential(nn.Linear(self.d_t, self.d_fusion), nn.GELU())
         self.vis_proj = nn.Sequential(nn.Linear(self.d_v, self.d_fusion), nn.GELU())
@@ -77,7 +77,7 @@ class CrossModalAttention(nn.Module):
 
         # 融合头
         self.fusion_head = GatedFusion(self.d_fusion)
-
+        
     def forward(self, t_feats: torch.Tensor, v_feats: torch.Tensor) -> torch.Tensor:
         """
         Args:
@@ -86,8 +86,8 @@ class CrossModalAttention(nn.Module):
         Returns:
             fused_output (torch.Tensor): 融合特征，shape = [B, d_fusion]
         """
-        # assert t_feats.device == self.text_proj[0].weight.device, "设备不一致！"
-        # assert v_feats.device == self.vis_proj[0].weight.device, "设备不一致！"
+        
+
         # print(f"t_feats.device: {t_feats.device}, v_feats.device: {v_feats.device}, self.text_proj[0].weight.device: {self.text_proj[0].weight.device}")
         # 输入为 [B, D]
         t_proj = self.text_proj(t_feats)  # [B, d_fusion]

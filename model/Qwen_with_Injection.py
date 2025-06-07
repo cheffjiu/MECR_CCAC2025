@@ -63,6 +63,7 @@ class QwenWithInjection(PreTrainedModel, GenerationMixin):
         input_ids: torch.LongTensor,
         attention_mask: Optional[torch.Tensor] = None,
         batched_graph: Optional[Any] = None,
+        h_change: Optional[torch.Tensor] = None, #模型的generate()使用
         labels: Optional[torch.LongTensor] = None,
         past_key_values: Optional[Tuple[Tuple[torch.Tensor]]] = None,
         output_attentions: Optional[bool] = None,
@@ -83,7 +84,7 @@ class QwenWithInjection(PreTrainedModel, GenerationMixin):
         )
         #获取h_change
         h_change = None
-        if batched_graph is not None:
+        if h_change is None and batched_graph is not None:
             h_change, _ = self.multimodal_emotion_gnn(batched_graph)
             # print(f"GNN生成的h_change形状: {h_change.shape}, 类型: {h_change.dtype}")
 
@@ -106,7 +107,7 @@ class QwenWithInjection(PreTrainedModel, GenerationMixin):
         # print(f"基础模型输出形状: {last_hidden_state.shape}")
 
         # 注入 h_change 特征
-        if past_key_values is None:
+        if h_change is not None:
             injected_hidden = self.injection_module(last_hidden_state, h_change)
         else:
             injected_hidden = last_hidden_state
@@ -134,6 +135,7 @@ class QwenWithInjection(PreTrainedModel, GenerationMixin):
             hidden_states=backbone_outputs.hidden_states,
             attentions=backbone_outputs.attentions,
         )
+    
 
     # =========== 生成相关 ===========
     def prepare_inputs_for_generation(
@@ -141,30 +143,32 @@ class QwenWithInjection(PreTrainedModel, GenerationMixin):
         input_ids: torch.LongTensor,
         past_key_values: Optional[Tuple[Tuple[torch.Tensor]]] = None,
         attention_mask: Optional[torch.Tensor] = None,
-        h_change: Optional[torch.Tensor] = None,
+        batched_graph: Optional[Any] = None,
+        h_change: Optional[torch.Tensor] = None,  # <<< 加入这个
         **kwargs,
     ) -> Dict[str, Any]:
         """
-        为生成步骤准备输入
+        为生成步骤准备输入，确保 h_change 在每一步都传入 forward。
         """
 
-        # 如果 KV 缓存已存在，我们只需要将最后一个 token 作为模型的输入。
+        # 如果 KV 缓存已存在，我们只需要将最后一个 token 作为输入。
         if past_key_values is not None:
-            # 将 input_ids 切片，只保留最后一个 token
             input_ids = input_ids[:, -1:]
 
-        # （可选）打印语句用于调试
-        # print(
-        #     f"生成输入准备 (修复后): input_ids={input_ids.shape}, h_change={h_change.shape if h_change is not None else None}"
-        # )
+        # 如果当前 step 没传 h_change，手动从 batched_graph 生成（通常只会在第一步）
+        if h_change is None and batched_graph is not None:
+            h_change, _ = self.multimodal_emotion_gnn(batched_graph)
 
         return {
-            "input_ids": input_ids,  
-            "past_key_values": past_key_values,
+            "input_ids": input_ids,
             "attention_mask": attention_mask,
-            "h_change": h_change,
+            "past_key_values": past_key_values,
+            "batched_graph": batched_graph,  # optional，可用于 debug
+            "h_change": h_change,  # <<< 持续传递
             **kwargs,
         }
+    
+
 
     def _reorder_cache(
         self,
