@@ -1,196 +1,205 @@
 import json
-from typing import List, Dict
+from typing import List, Dict, Any
 from transformers import AutoTokenizer
 import evaluate
 import nltk
 import re
 
+# 确保 NLTK 资源可用，仅在需要时下载
+try:
+    nltk.data.find('wordnet.zip')
+except nltk.downloader.DownloadError:
+    nltk.download('wordnet')
+try:
+    nltk.data.find('omw-1.4.zip')
+except nltk.downloader.DownloadError:
+    nltk.download('omw-1.4')
+try:
+    nltk.data.find('punkt.zip')
+except nltk.downloader.DownloadError:
+    nltk.download('punkt')
 
 
 class RationaleEvaluator:
-    def __init__(
-        self,
-        model_name: str,
-    ):
+    def __init__(self, model: str):
         """
-        情感推理评估器初始化
+        情感归因评估器初始化。
 
         Args:
-            model_name: 用于解码的HuggingFace模型路径
+            model_path: 用于解码的 HuggingFace 模型路径（主要用于获取 tokenizer）。
         """
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.tokenizer = AutoTokenizer.from_pretrained(model)
         self.meteor_metric = evaluate.load("meteor")
         self.bert_metric = evaluate.load("bertscore")
+        # BERTScore 的模型类型在 compute_metrics 中指定为 "bert-base-chinese"
 
-    def safe_extract_rationale(self, raw_output: str):
+    def decode_generated_tokens(self, generated_ids: List[List[int]]) -> List[str]:
         """
-        尽力从模型输出中提取 rationale 字段中的 stimulus, appraisal, response 文本。
-        即使原始输出不是合法 JSON。
+        将模型生成的 token ID 解码成带标签的多行纯文本。
+
+        Args:
+            generated_ids: 模型 generate 方法输出的 token ID 列表，
+                           其中每个子列表代表一个生成序列的 token IDs。
+
+        Returns:
+            List[str]: 解码后的带标签的多行纯文本字符串列表。
         """
-        if not raw_output or len(raw_output.strip()) == 0:
-            return ""  # 空字符串
+        # 注意：这里假设 generated_ids 已经经过了切片处理，即移除了 prompt 部分
+        decoded_texts = self.tokenizer.batch_decode(
+            generated_ids, skip_special_tokens=True
+        )
+        return decoded_texts
 
-        # 尝试直接加载
-        try:
-            return self.format_rationale(json.loads(raw_output)) # 这里也尝试解析一下
-        except Exception:
-            pass  # json.loads 失败就尝试正则提取
-
-        # 使用正则匹配三段内容（兼容中文引号、缩进等格式）
-        stimulus_textual_match = re.search(r'"textual"\s*:\s*["“](.*?)["”]', raw_output)
-        stimulus_visual_match = re.search(r'"visual"\s*:\s*["“](.*?)["”]', raw_output)
-        appraisal_match = re.search(r'"appraisal"\s*:\s*["“](.*?)["”]', raw_output)
-        response_match = re.search(r'"response"\s*:\s*["“](.*?)["”]', raw_output)
-
-        parts = []
-        if stimulus_textual_match:
-            parts.append(stimulus_textual_match.group(1).strip("。"))
-        if stimulus_visual_match and stimulus_visual_match.group(1).strip().lower() != "null":
-            parts.append(stimulus_visual_match.group(1).strip("。"))
-        if appraisal_match:
-            parts.append(appraisal_match.group(1).strip("。"))
-        if response_match:
-            parts.append(response_match.group(1).strip("。"))
-
-        return "。".join(parts) + "。" if parts else ""
-
-    def format_rationale(self, rationale: Dict) -> str:
+    def _parse_tagged_text_to_dict(self, tagged_text: str) -> Dict[str, Any]:
         """
-        将JSON格式的rationale转换为评估用文本
+        内部方法：将带标签的多行纯文本解析成一个中间字典。
+        这是 LLM 实际输出的格式（或监督 Label 的格式）。
         """
-        # --- DEBUG PRINT ---
-        print("\n--- DEBUG: In format_rationale ---")
-        print(f"Input 'rationale' type: {type(rationale)}")
-        print(f"Input 'rationale' content (first 200 chars or full if dict): {str(rationale)[:200] if isinstance(rationale, str) else rationale}")
-        # --- END DEBUG ---
+        parsed_data = {
+            "stimulus_textual": None,
+            "stimulus_visual": None,
+            "appraisal": None,
+            "response": None,
+        }
 
-        # 核心逻辑：确保 rationale 变量是字典
-        if isinstance(rationale, str):
-            # 如果 rationale 仍然是一个字符串，说明之前的处理没有成功，
-            # 或者它是一个模型生成的原始字符串（非JSON），需要特殊处理。
-            # 这里简单返回字符串本身，或者进行更复杂的解析（如safe_extract_rationale）
-            # 但为了避免递归循环，我们应该避免再次尝试 json.loads
-            # 如果期望它是JSON，那么之前的 json.loads 应该成功了。
-            # 如果走到这里是字符串，那它可能就是 plain text。
-            print("DEBUG: format_rationale received a string, which is unexpected for direct dictionary access.")
-            return self.safe_extract_rationale(rationale) # 尝试用 safe_extract_rationale 处理
+        if not tagged_text or len(tagged_text.strip()) == 0:
+            return parsed_data
 
-        if "rationale" in rationale and isinstance(rationale["rationale"], dict):
-            actual_rationale = rationale["rationale"]
-        else:
-            actual_rationale = rationale
+        lines = tagged_text.strip().split('\n')
+
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+
+            if line.startswith("[STIMULUS_TEXT]:"):
+                content = line.replace("[STIMULUS_TEXT]:", "", 1).strip()
+                parsed_data["stimulus_textual"] = content
+            elif line.startswith("[STIMULUS_VISUAL]:"):
+                content = line.replace("[STIMULUS_VISUAL]:", "", 1).strip()
+                parsed_data["stimulus_visual"] = content if content.lower() != "无" else None
+            elif line.startswith("[APPRAISAL]:"):
+                content = line.replace("[APPRAISAL]:", "", 1).strip()
+                parsed_data["appraisal"] = content
+            elif line.startswith("[RESPONSE]:"):
+                content = line.replace("[RESPONSE]:", "", 1).strip()
+                parsed_data["response"] = content
+        return parsed_data
+
+    def _format_dict_to_eval_text(self, data_dict: Dict[str, Any]) -> str:
+        """
+        内部方法：将解析后的中间字典（或原始JSON结构）转换为最终评估所需的单行纯文本格式。
+        即："{textual stimulus}；{visual stimulus}。{appraisal}。{response}。"
+        """
+        textual = data_dict.get("stimulus_textual")
+        visual = data_dict.get("stimulus_visual")
+        appraisal = data_dict.get("appraisal")
+        response = data_dict.get("response")
 
         stimulus_parts = []
-        if "stimulus" in actual_rationale and actual_rationale["stimulus"]:
-            if (
-                "textual" in actual_rationale["stimulus"]
-                and actual_rationale["stimulus"]["textual"]
-            ):
-                stimulus_parts.append(
-                    actual_rationale["stimulus"]["textual"].strip("。")
-                )
+        if textual:
+            # 移除末尾句号，以免与后续连接的句号重复
+            stimulus_parts.append(textual.strip("。")) 
 
-            if (
-                "visual" in actual_rationale["stimulus"]
-                and actual_rationale["stimulus"]["visual"]
-                and actual_rationale["stimulus"]["visual"].strip().lower() != "null"
-            ):
-                stimulus_parts.append(
-                    actual_rationale["stimulus"]["visual"].strip("。")
-                )
+        if visual and visual.strip().lower() != "null":
+            if stimulus_parts: # 如果文本刺激存在，则用分号连接
+                stimulus_parts[0] += f"；{visual.strip('。')}"
+            else: # 如果文本刺激不存在，则直接添加视觉刺激
+                stimulus_parts.append(visual.strip("。"))
 
-        formatted_stimulus = ";".join(stimulus_parts)
+        formatted_stimulus_part = "".join(stimulus_parts)
 
         components = []
-        if formatted_stimulus:
-            components.append(formatted_stimulus)
-
-        if "appraisal" in actual_rationale and actual_rationale["appraisal"]:
-            components.append(actual_rationale["appraisal"].strip("。"))
-
-        if "response" in actual_rationale and actual_rationale["response"]:
-            components.append(actual_rationale["response"].strip("。"))
+        if formatted_stimulus_part:
+            components.append(formatted_stimulus_part)
         
+        if appraisal:
+            components.append(appraisal.strip("。"))
+
+        if response:
+            components.append(response.strip("。"))
+        
+        # 使用句号连接所有主要部分，并在末尾加上一个句号
         final_text = "。".join(components) + "。" if components else ""
-        # --- DEBUG PRINT ---
-        print(f"DEBUG: Formatted rationale output: {final_text[:200]}...")
-        print("--- END DEBUG: In format_rationale ---\n")
-        # --- END DEBUG ---
         return final_text
+
+    def prepare_for_evaluation(self, input_data: Any) -> str:
+        """
+        将任何有效输入（LLM 原始输出字符串、原始 JSON 字典、或解析后的中间字典）
+        统一转换为评估所需的最终单行纯文本格式。
+        """
+        if isinstance(input_data, str):
+            # 如果是 LLM 原始输出（带标签的纯文本），先解析成字典
+            parsed_dict = self._parse_tagged_text_to_dict(input_data)
+            return self._format_dict_to_eval_text(parsed_dict)
+        elif isinstance(input_data, dict):
+            # 如果是原始 JSON 字典，需要从中提取出 rationale 部分，并将其转换为中间字典格式，
+            # 或者直接从原始 JSON 中提取字段进行格式化。
+            # 为了简化，我们统一转换为中间字典结构，再进行格式化。
+            rationale_core = input_data.get("rationale", input_data) # 兼容直接是rationale字典或包含rationale的字典
+            
+            # 这里的字段名与 _parse_tagged_text_to_dict 的输出字段名保持一致
+            intermediate_dict = {
+                "stimulus_textual": rationale_core.get("stimulus", {}).get("textual"),
+                "stimulus_visual": rationale_core.get("stimulus", {}).get("visual"),
+                "appraisal": rationale_core.get("appraisal"),
+                "response": rationale_core.get("response"),
+            }
+            # 特殊处理 visual 为 None 的情况，使其与 _parse_tagged_text_to_dict 的 "无" 保持一致，再传给 _format_dict_to_eval_text
+            if intermediate_dict["stimulus_visual"] is None:
+                 intermediate_dict["stimulus_visual"] = "无" # 临时的，只为 _format_dict_to_eval_text 处理
+
+            return self._format_dict_to_eval_text(intermediate_dict)
+        else:
+            raise TypeError(f"Unsupported input type for preparation: {type(input_data)}")
 
     def compute_metrics(
         self,
-        predictions: List[Dict],  # 现在直接接收已解码的JSON字典列表或字符串输出
-        references: List[Dict],   # 参考的rationale字典
+        predictions: List[str],  # 预测是LLM直接输出的带标签多行纯文本字符串列表
+        references: List[Dict],  # 参考是原始 JSON 格式的 rationale 字典列表 (来自您的数据加载器)
     ) -> Dict[str, float]:
         """
-        计算评估指标
+        计算评估指标。
+
+        Args:
+            predictions: LLM 直接输出的**带标签多行纯文本**字符串列表。
+            references: 原始 JSON 格式的 rationale 字典列表 (来自数据加载器)。
 
         Returns:
-            {
-                "meteor": METEOR分数,
-                "bert_score": BERTScore F1均值,
-                "score_sum": 排名分数总和 (越小越好)
-            }
+            Dict[str, float]: 包含 meteor, bert_score 和 score_sum 的字典。
         """
-        # --- DEBUG PRINT ---
-        print("\n--- DEBUG: In compute_metrics ---")
-        print(f"Input predictions type: {type(predictions)}")
-        if len(predictions) > 0:
-            print(f"predictions[0] type: {type(predictions[0])}")
-            print(f"predictions[0] content: {predictions[0][:200] if isinstance(predictions[0], str) else predictions[0]}")
-        print(f"Input references type: {type(references)}")
-        if len(references) > 0:
-            print(f"references[0] type: {type(references[0])}")
-            print(f"references[0] content: {references[0]}")
-        # --- END DEBUG ---
+        # 1. 将预测和参考都转换为评估所需的最终单行纯文本格式
+        # predictions 是 LLM 的带标签输出字符串，需要先解析再格式化
+        pred_texts = [self.prepare_for_evaluation(p_str) for p_str in predictions]
+        
+        # references 是原始 JSON 字典，也需要通过 prepare_for_evaluation 格式化
+        ref_texts = [self.prepare_for_evaluation(r_dict) for r_dict in references]
 
-        # 预测文本的处理：如果预测是字符串，尝试用 safe_extract_rationale，否则直接用 format_rationale
-        pred_texts = [
-            self.safe_extract_rationale(p) if isinstance(p, str) else self.format_rationale(p)
-            for p in predictions
-        ]
-        # 参考文本的处理：确保 references 已经是字典列表
-        ref_texts = [self.format_rationale(r) for r in references] # 这里的 r 应该是字典了
+        # 确保预测和参考数量一致
+        if len(pred_texts) != len(ref_texts):
+            print(f"WARNING: Mismatched lengths of predictions ({len(pred_texts)}) and references ({len(ref_texts)}). Truncating to minimum length.")
+            min_len = min(len(pred_texts), len(ref_texts))
+            pred_texts = pred_texts[:min_len]
+            ref_texts = ref_texts[:min_len]
 
-        # --- DEBUG PRINT ---
-        print(f"DEBUG: After processing in compute_metrics:")
-        if len(pred_texts) > 0:
-            print(f"DEBUG: pred_texts[0] type: {type(pred_texts[0])}, content: {pred_texts[0][:200]}...")
-        if len(ref_texts) > 0:
-            print(f"DEBUG: ref_texts[0] type: {type(ref_texts[0])}, content: {ref_texts[0][:200]}...")
-        print("--- END DEBUG: In compute_metrics ---\n")
-        # --- END DEBUG ---
-
+        # 计算 METEOR 分数
         meteor_result = self.meteor_metric.compute(
             predictions=pred_texts, references=ref_texts
         )
-        meteor_score = meteor_result["meteor"]
+        meteor_score = meteor_result.get("meteor", 0.0)
 
+        # 计算 BERTScore 分数
         bert_result = self.bert_metric.compute(
             predictions=pred_texts,
             references=ref_texts,
             lang="zh",
-            model_type="bert-base-chinese",
+            model_type="bert-base-chinese", # 指定中文 BERT 模型
         )
-        bert_f1 = sum(bert_result["f1"]) / len(bert_result["f1"])
+        bert_f1 = sum(bert_result["f1"]) / len(bert_result["f1"]) if bert_result and "f1" in bert_result and len(bert_result["f1"]) > 0 else 0.0
 
+        # score_sum 越大越好
         return {
             "meteor": round(meteor_score, 4),
             "bert_score": round(bert_f1, 4),
             "score_sum": round(meteor_score + bert_f1, 4),
         }
-
-# test_rationale = RationaleEvaluator(model_name="Qwen/Qwen3-0.6B")
-# data = {
-#     "rationale": {
-#         "stimulus": {
-#             "textual": "A对B没能积累意向客户表示不满",
-#             "visual": "A的表情变化：愤怒 -> 惊讶 -> 开心",
-#         },
-#         "appraisal": "B认为A只让自己去发传单，没有让自己去获取客户电话",
-#         "response": "B感到委屈并且有点生气",
-#     }
-# }
-# result = test_rationale.format_rationale(data["rationale"])
-# print(result)
