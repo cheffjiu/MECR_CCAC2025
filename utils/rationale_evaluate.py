@@ -8,14 +8,14 @@ import re
 
 
 class RationaleEvaluator:
-    def __init__(self, model: str):
+    def __init__(self, model_name: str):
         """
         情感归因评估器初始化。
 
         Args:
             model_path: 用于解码的 HuggingFace 模型路径（主要用于获取 tokenizer）。
         """
-        self.tokenizer = AutoTokenizer.from_pretrained(model)
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.meteor_metric = evaluate.load("meteor")
         self.bert_metric = evaluate.load("bertscore")
         # BERTScore 的模型类型在 compute_metrics 中指定为 "bert-base-chinese"
