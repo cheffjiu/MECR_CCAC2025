@@ -5,19 +5,6 @@ import evaluate
 import nltk
 import re
 
-# 确保 NLTK 资源可用，仅在需要时下载
-try:
-    nltk.data.find("wordnet.zip")
-except nltk.downloader.DownloadError:
-    nltk.download("wordnet")
-try:
-    nltk.data.find("omw-1.4.zip")
-except nltk.downloader.DownloadError:
-    nltk.download("omw-1.4")
-try:
-    nltk.data.find("punkt.zip")
-except nltk.downloader.DownloadError:
-    nltk.download("punkt")
 
 
 class RationaleEvaluator:
