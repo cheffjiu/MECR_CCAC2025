@@ -7,17 +7,17 @@ import re
 
 # 确保 NLTK 资源可用，仅在需要时下载
 try:
-    nltk.data.find('wordnet.zip')
+    nltk.data.find("wordnet.zip")
 except nltk.downloader.DownloadError:
-    nltk.download('wordnet')
+    nltk.download("wordnet")
 try:
-    nltk.data.find('omw-1.4.zip')
+    nltk.data.find("omw-1.4.zip")
 except nltk.downloader.DownloadError:
-    nltk.download('omw-1.4')
+    nltk.download("omw-1.4")
 try:
-    nltk.data.find('punkt.zip')
+    nltk.data.find("punkt.zip")
 except nltk.downloader.DownloadError:
-    nltk.download('punkt')
+    nltk.download("punkt")
 
 
 class RationaleEvaluator:
@@ -65,7 +65,7 @@ class RationaleEvaluator:
         if not tagged_text or len(tagged_text.strip()) == 0:
             return parsed_data
 
-        lines = tagged_text.strip().split('\n')
+        lines = tagged_text.strip().split("\n")
 
         for line in lines:
             line = line.strip()
@@ -77,7 +77,9 @@ class RationaleEvaluator:
                 parsed_data["stimulus_textual"] = content
             elif line.startswith("[STIMULUS_VISUAL]:"):
                 content = line.replace("[STIMULUS_VISUAL]:", "", 1).strip()
-                parsed_data["stimulus_visual"] = content if content.lower() != "无" else None
+                parsed_data["stimulus_visual"] = (
+                    content if content.lower() != "无" else None
+                )
             elif line.startswith("[APPRAISAL]:"):
                 content = line.replace("[APPRAISAL]:", "", 1).strip()
                 parsed_data["appraisal"] = content
@@ -99,12 +101,12 @@ class RationaleEvaluator:
         stimulus_parts = []
         if textual:
             # 移除末尾句号，以免与后续连接的句号重复
-            stimulus_parts.append(textual.strip("。")) 
+            stimulus_parts.append(textual.strip("。"))
 
         if visual and visual.strip().lower() != "null":
-            if stimulus_parts: # 如果文本刺激存在，则用分号连接
+            if stimulus_parts:  # 如果文本刺激存在，则用分号连接
                 stimulus_parts[0] += f"；{visual.strip('。')}"
-            else: # 如果文本刺激不存在，则直接添加视觉刺激
+            else:  # 如果文本刺激不存在，则直接添加视觉刺激
                 stimulus_parts.append(visual.strip("。"))
 
         formatted_stimulus_part = "".join(stimulus_parts)
@@ -112,13 +114,13 @@ class RationaleEvaluator:
         components = []
         if formatted_stimulus_part:
             components.append(formatted_stimulus_part)
-        
+
         if appraisal:
             components.append(appraisal.strip("。"))
 
         if response:
             components.append(response.strip("。"))
-        
+
         # 使用句号连接所有主要部分，并在末尾加上一个句号
         final_text = "。".join(components) + "。" if components else ""
         return final_text
@@ -136,8 +138,10 @@ class RationaleEvaluator:
             # 如果是原始 JSON 字典，需要从中提取出 rationale 部分，并将其转换为中间字典格式，
             # 或者直接从原始 JSON 中提取字段进行格式化。
             # 为了简化，我们统一转换为中间字典结构，再进行格式化。
-            rationale_core = input_data.get("rationale", input_data) # 兼容直接是rationale字典或包含rationale的字典
-            
+            rationale_core = input_data.get(
+                "rationale", input_data
+            )  # 兼容直接是rationale字典或包含rationale的字典
+
             # 这里的字段名与 _parse_tagged_text_to_dict 的输出字段名保持一致
             intermediate_dict = {
                 "stimulus_textual": rationale_core.get("stimulus", {}).get("textual"),
@@ -147,16 +151,22 @@ class RationaleEvaluator:
             }
             # 特殊处理 visual 为 None 的情况，使其与 _parse_tagged_text_to_dict 的 "无" 保持一致，再传给 _format_dict_to_eval_text
             if intermediate_dict["stimulus_visual"] is None:
-                 intermediate_dict["stimulus_visual"] = "无" # 临时的，只为 _format_dict_to_eval_text 处理
+                intermediate_dict["stimulus_visual"] = (
+                    "无"  # 临时的，只为 _format_dict_to_eval_text 处理
+                )
 
             return self._format_dict_to_eval_text(intermediate_dict)
         else:
-            raise TypeError(f"Unsupported input type for preparation: {type(input_data)}")
+            raise TypeError(
+                f"Unsupported input type for preparation: {type(input_data)}"
+            )
 
     def compute_metrics(
         self,
         predictions: List[str],  # 预测是LLM直接输出的带标签多行纯文本字符串列表
-        references: List[Dict],  # 参考是原始 JSON 格式的 rationale 字典列表 (来自您的数据加载器)
+        references: List[
+            Dict
+        ],  # 参考是原始 JSON 格式的 rationale 字典列表 (来自您的数据加载器)
     ) -> Dict[str, float]:
         """
         计算评估指标。
@@ -171,13 +181,15 @@ class RationaleEvaluator:
         # 1. 将预测和参考都转换为评估所需的最终单行纯文本格式
         # predictions 是 LLM 的带标签输出字符串，需要先解析再格式化
         pred_texts = [self.prepare_for_evaluation(p_str) for p_str in predictions]
-        
+
         # references 是原始 JSON 字典，也需要通过 prepare_for_evaluation 格式化
         ref_texts = [self.prepare_for_evaluation(r_dict) for r_dict in references]
 
         # 确保预测和参考数量一致
         if len(pred_texts) != len(ref_texts):
-            print(f"WARNING: Mismatched lengths of predictions ({len(pred_texts)}) and references ({len(ref_texts)}). Truncating to minimum length.")
+            print(
+                f"WARNING: Mismatched lengths of predictions ({len(pred_texts)}) and references ({len(ref_texts)}). Truncating to minimum length."
+            )
             min_len = min(len(pred_texts), len(ref_texts))
             pred_texts = pred_texts[:min_len]
             ref_texts = ref_texts[:min_len]
@@ -193,9 +205,13 @@ class RationaleEvaluator:
             predictions=pred_texts,
             references=ref_texts,
             lang="zh",
-            model_type="bert-base-chinese", # 指定中文 BERT 模型
+            model_type="bert-base-chinese",  # 指定中文 BERT 模型
         )
-        bert_f1 = sum(bert_result["f1"]) / len(bert_result["f1"]) if bert_result and "f1" in bert_result and len(bert_result["f1"]) > 0 else 0.0
+        bert_f1 = (
+            sum(bert_result["f1"]) / len(bert_result["f1"])
+            if bert_result and "f1" in bert_result and len(bert_result["f1"]) > 0
+            else 0.0
+        )
 
         # score_sum 越大越好
         return {
