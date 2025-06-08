@@ -59,7 +59,7 @@ class config_train:
     num_train_epochs: int = 50  # 训练轮数
     learning_rate: float = 3e-4  # 学习率
     weight_decay: float = 0.01  # 权重衰减
-    warmup_ratio: float = 0.05  # 权重衰减
+    warmup_ratio: float = 0.1 # 预热率
     accumulation_steps: int = 2  # 梯度累积步数
     max_grad_norm: float = 1.0  # 梯度裁剪阈#
     # === 生成参数 ===

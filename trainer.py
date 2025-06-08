@@ -15,27 +15,24 @@ import torch
 from torch.utils.data import DataLoader
 from transformers import (
     AutoTokenizer,
-    get_linear_schedule_with_warmup,
     AutoModelForCausalLM,
+    get_cosine_schedule_with_warmup
+
 )
 from tqdm import tqdm
 from dataclasses import dataclass
 from accelerate import Accelerator
+
 
 # Import PEFT modules
 from peft import LoraConfig, get_peft_model, TaskType
 
 # 导入自定义模块
 from model.Qwen_with_Injection import QwenWithInjection
-
-# from model.emotion_graph_encoder import EmotionGraphEncoder
-from model.Inject_to_llm import InjectionModule
 from MECE_data.mecr_dataset import MECRDataset
 from MECE_data.collate_to_graph_batch import CustomCollate
 from MECE_data.build_emotion_graph import build_emotion_graph
 
-# from model.feature_fusion import CrossModalAttention
-from model.multimodal_emotion_gnn import MultimodalEmotionGNN
 from utils.rationale_evaluate import RationaleEvaluator
 
 
@@ -135,7 +132,7 @@ class Trainer:
                     p for n, p in self.model.named_parameters() # <--- 只需要遍历 self.model
                     if any(nd in n for nd in no_decay) and p.requires_grad
                 ],
-                "weight_decay": self.config.cfg_train.weight_decay,
+                "weight_decay": 0.0,
             },
         ]
         self.optimizer = torch.optim.AdamW(
@@ -145,10 +142,11 @@ class Trainer:
 
         num_training_steps = len(self.train_dataloader) * self.config.cfg_train.num_train_epochs
         num_warmup_steps = int(num_training_steps * self.config.cfg_train.warmup_ratio)
-        self.lr_scheduler = get_linear_schedule_with_warmup(
+        self.lr_scheduler = get_cosine_schedule_with_warmup(
             self.optimizer,
             num_warmup_steps=num_warmup_steps,
             num_training_steps=num_training_steps,
+            num_cycles=0.5 
         )
 
         # 6. 使用 accelerator.prepare() 包装所有组件
