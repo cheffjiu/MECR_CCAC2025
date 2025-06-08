@@ -194,7 +194,7 @@ class Trainer:
             encoded_inputs = self.tokenizer(
                 prompt_texts,
                 return_tensors="pt",
-                padding="longest",
+                padding="max_length",
                 truncation=True,
                 max_length=1024,
             ).to(self.device)
@@ -204,9 +204,9 @@ class Trainer:
             encoded_labels = self.tokenizer(
                 label_texts,
                 return_tensors="pt",
-                padding="longest",
+                padding="max_length",
                 truncation=True,
-                max_length=512,
+                max_length=1024,
             ).to(self.device)
             labels = encoded_labels["input_ids"]
             labels = torch.where(labels == self.tokenizer.pad_token_id, -100, labels)

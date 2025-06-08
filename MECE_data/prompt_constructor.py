@@ -169,25 +169,25 @@ class DefaultPromptConstructor(PromptConstructor):
 #             "response": "A感到愤怒",
 #         },
 #     },
-#     {
-#         "dialogue": "A [Neutral]: 你先把衣服换了，然后去这个地址。\nA [Neutral]: 一会儿会有装修公司的人过去，你去监工，看看有什么可以帮忙的。\nB [Sad]: 这个活也派我干呀？\nB [Sad]: 装修我不懂。\nA [Anger]: 你发了两天传单了，有没有意向客户啊？要到人家电话没有？\nB [Sad]: 你不就光让我发传单吗？没让我要电话呀!",
-#         "rationale": {
-#             "stimulus": {
-#                 "textual": "A对B没能积累意向客户表示不满",
-#                 "visual": "A双手环抱胸前瞪着B",
-#             },
-#             "appraisal": "B认为A只让自己去发传单，没有让自己去获取客户电话",
-#             "response": "B感到委屈并且有点生气",
-#         },
-#     },
-#     {
-#         "dialogue": "A [Neutral]: 其实，我还真舍不得让你去伺候媳妇。\nA [Neutral]: 有你在店里，能帮我分担不少呢，我这负担也小多了。\nA [Neutral]: 额，帮我搭把手、干活、说个话，这...\nA [Happy]: 男女搭配，干活不累嘛，呵呵。\nB [Sad]: 亲家伺候媳妇，那倒对。\nB [Sad]: 我也不是她亲妈，不知道她爱吃什么，不爱吃什么。\nB [Sad]: 要是伺候不好，她不痛快，我也不痛快。\nA [Happy]: 你这么想就对了，呵呵。\nA [Happy]: 咱们做父母的，不就是为儿女做贡献的吗，是不是？\nB [Sad]: 年底咱回去吧，回老家。\nB [Sad]: 这夏天还能凑合，冬天你那腰根本就不行。\nA [Surprise]: 我，我回老家？",
-#         "rationale": {
-#             "stimulus": {"textual": "B表示要和A年底回老家", "visual": None},
-#             "appraisal": "A没想到B会突然提出要回老家，这让他感到意外",
-#             "response": "A有点惊讶",
-#         },
-#     },
+#     # {
+#     #     "dialogue": "A [Neutral]: 你先把衣服换了，然后去这个地址。\nA [Neutral]: 一会儿会有装修公司的人过去，你去监工，看看有什么可以帮忙的。\nB [Sad]: 这个活也派我干呀？\nB [Sad]: 装修我不懂。\nA [Anger]: 你发了两天传单了，有没有意向客户啊？要到人家电话没有？\nB [Sad]: 你不就光让我发传单吗？没让我要电话呀!",
+#     #     "rationale": {
+#     #         "stimulus": {
+#     #             "textual": "A对B没能积累意向客户表示不满",
+#     #             "visual": "A双手环抱胸前瞪着B",
+#     #         },
+#     #         "appraisal": "B认为A只让自己去发传单，没有让自己去获取客户电话",
+#     #         "response": "B感到委屈并且有点生气",
+#     #     },
+#     # },
+#     # {
+#     #     "dialogue": "A [Neutral]: 其实，我还真舍不得让你去伺候媳妇。\nA [Neutral]: 有你在店里，能帮我分担不少呢，我这负担也小多了。\nA [Neutral]: 额，帮我搭把手、干活、说个话，这...\nA [Happy]: 男女搭配，干活不累嘛，呵呵。\nB [Sad]: 亲家伺候媳妇，那倒对。\nB [Sad]: 我也不是她亲妈，不知道她爱吃什么，不爱吃什么。\nB [Sad]: 要是伺候不好，她不痛快，我也不痛快。\nA [Happy]: 你这么想就对了，呵呵。\nA [Happy]: 咱们做父母的，不就是为儿女做贡献的吗，是不是？\nB [Sad]: 年底咱回去吧，回老家。\nB [Sad]: 这夏天还能凑合，冬天你那腰根本就不行。\nA [Surprise]: 我，我回老家？",
+#     #     "rationale": {
+#     #         "stimulus": {"textual": "B表示要和A年底回老家", "visual": None},
+#     #         "appraisal": "A没想到B会突然提出要回老家，这让他感到意外",
+#     #         "response": "A有点惊讶",
+#     #     },
+#     # },
 # ]
 # # 生成最终结果
 # final_result = sample_prompt.build_prompt(sample, similary_samples)
