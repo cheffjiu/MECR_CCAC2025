@@ -28,6 +28,7 @@ class config_model:
     injection_dropout: float = 0.1  # 丢弃率
     #===LLM参数配置====#
     llm_name: str = "Qwen/Qwen3-0.6B"  # 模型名称或路径
+    tokenizer_name:str="Qwen/Qwen3-0.6B"
     
 
 @dataclass
@@ -49,22 +50,22 @@ class config_dataset_dataloader:
     )
     feature_root_val: str = os.path.join(project_root, "data/feature/val")
     # ===配置dataloader参数===#
-    batch_size: int = 8 # 批大小
-    num_workers: int = 4 # 工作进程数
+    batch_size: int = 12 # 批大小
+    num_workers: int = 8 # 工作进程数
 
 
 @dataclass
 class config_train:
     # ===配置训练参数===#
-    num_train_epochs: int = 50  # 训练轮数
-    learning_rate: float = 3e-4  # 学习率
+    num_train_epochs: int = 100 # 训练轮数
+    learning_rate: float = 5e-4  # 学习率
     weight_decay: float = 0.01  # 权重衰减
     warmup_ratio: float = 0.1 # 预热率
     accumulation_steps: int = 2  # 梯度累积步数
     max_grad_norm: float = 1.0  # 梯度裁剪阈#
     # === 生成参数 ===
     # 针对情感回应生成，我们通常希望回应既有创造性又不过于离谱，避免重复
-    max_new_tokens: int = 80 # 根据情感回应的典型长度调整，例如 80-120 词
+    max_new_tokens: int = 120 # 根据情感回应的典型长度调整，例如 80-120 词
     num_beams: int = 1        # 采样模式下通常设为1，不使用束搜索
     do_sample: bool = True    # 启用采样，增加回应多样性
 
@@ -76,7 +77,6 @@ class config_train:
     patience: int = 5  # 早停轮数
     min_delta: float = 0.001  # 早停最小变化
     # ===配置模型保存===#
-    start_validation_epoch: int = 25 # 开始验证的轮数
     model_save_path: str = os.path.join(
         project_root, "checkpoints", "model.pth"
     )  # 模型保存路径

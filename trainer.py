@@ -50,7 +50,7 @@ class Trainer:
 
         # 2. Tokenizer
         self.tokenizer = AutoTokenizer.from_pretrained(
-            self.config.cfg_dataset_dataloader.tokenizer_name, trust_remote_code=True
+            self.config.cfg_model.tokenizer_name, trust_remote_code=True
         )
 
         # 3. 初始化模型
@@ -77,6 +77,13 @@ class Trainer:
 
         # Apply LoRA to the model
         self.model = get_peft_model(self.model, lora_config)
+        print("\n--- 手动启用 GNN 和 InjectionModule 参数的 requires_grad ---")
+        for name, param in self.model.named_parameters():
+            # 检查参数名称是否属于 GNN 或 InjectionModule
+            if "multimodal_emotion_gnn" in name or "injection_module" in name:
+                param.requires_grad = True
+                print(f"已启用可训练: {name}, 形状: {param.shape}")
+        print("--- 启用完成 ---\n")
         self.model.print_trainable_parameters()
         # --- End LoRA Configuration ---
 
@@ -114,7 +121,18 @@ class Trainer:
         )
 
         # 5. 优化器和学习率调度器数
+
         no_decay = ["bias", "LayerNorm.weight"]
+        # --- 在这里添加打印所有 requires_grad=True 参数的代码 ---
+        print("\n--- 检查模型中的所有可训练参数 (requires_grad=True) ---")
+        trainable_params_count = 0
+        for name, param in self.model.named_parameters():
+            if param.requires_grad:
+                print(f"可训练参数: {name}, 形状: {param.shape}")
+                trainable_params_count += 1
+        print(f"总计发现 {trainable_params_count} 个可训练参数。")
+        print("---------------------------------------------------\n")
+        # --- 打印结束 ---
         # 只需收集 self.model (QwenWithInjection，它现在包含了所有子模块) 的参数
         optimizer_grouped_parameters = [
             {
@@ -186,41 +204,53 @@ class Trainer:
         )
 
         for batch in progress_bar:
-
             batched_graph = batch[0]
             prompt_texts = batch[1]
             label_texts = batch[2]
 
+            # 拼接 prompt + label
+            prompt_label_texts = [p + l for p, l in zip(prompt_texts, label_texts)]
+
+            # 编码拼接后的输入（用于 input_ids 和 labels）
             encoded_inputs = self.tokenizer(
-                prompt_texts,
+                prompt_label_texts,
                 return_tensors="pt",
                 padding="max_length",
                 truncation=True,
                 max_length=1024,
             ).to(self.device)
+
             input_ids = encoded_inputs["input_ids"]
             attention_mask = encoded_inputs["attention_mask"]
 
-            encoded_labels = self.tokenizer(
-                label_texts,
-                return_tensors="pt",
-                padding="max_length",
-                truncation=True,
-                max_length=1024,
-            ).to(self.device)
-            labels = encoded_labels["input_ids"]
-            labels = torch.where(labels == self.tokenizer.pad_token_id, -100, labels)
+            # 编码 prompt，用于构造 labels 的 mask
+            with self.tokenizer.as_target_tokenizer():
+                encoded_prompts = self.tokenizer(
+                    prompt_texts,
+                    return_tensors="pt",
+                    padding="max_length",
+                    truncation=True,
+                    max_length=1024,
+                ).to(self.device)
 
-            # 模型前向传播
+            # 构造 labels：prompt 部分为 -100，label 部分为目标
+            labels = input_ids.clone()
+            prompt_lengths = (encoded_prompts["attention_mask"] == 1).sum(dim=1)
+
+            for i, prompt_len in enumerate(prompt_lengths):
+                labels[i, :prompt_len] = -100  # 屏蔽 prompt 部分
+
+            # 模型前向传播（含 batched_graph 注入）
             outputs = self.model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
                 batched_graph=batched_graph,
                 labels=labels,
             )
+
             loss = outputs.loss
 
-            # 反向传播和优化 (使用 accelerator)
+            # 反向传播与优化
             self.accelerator.backward(loss)
             if self.config.cfg_train.max_grad_norm > 0:
                 self.accelerator.clip_grad_norm_(
@@ -236,6 +266,7 @@ class Trainer:
 
         avg_loss = total_loss / len(self.train_dataloader)
         return avg_loss
+
 
     def _evaluate(self):
         self.model.eval()
@@ -254,30 +285,27 @@ class Trainer:
                 batched_graph = None
                 prompt_texts = None
                 label_texts_for_supervision = None
-                is_train_val_mode = len(batch_data) == 3  # 判断是否是训练/验证模式
+                is_train_val_mode = len(batch_data) == 3  # train/val 模式
 
-                if is_train_val_mode:  # train/val 模式下包含 label_texts
-                    batched_graph, prompt_texts, label_texts_for_supervision = (
-                        batch_data
-                    )
-                else:  # test 模式下没有 label_texts
+                if is_train_val_mode:
+                    batched_graph, prompt_texts, label_texts_for_supervision = batch_data
+                else:
                     batched_graph, prompt_texts = batch_data
                 batched_graph = batched_graph.to(self.device)
 
-                # 编码 prompt 输入
+                # 编码 prompt 输入用于生成
                 encoded_inputs = self.tokenizer(
                     prompt_texts,
                     return_tensors="pt",
                     padding="max_length",
                     truncation=True,
-                    max_length=512,
+                    max_length=1024,
                 ).to(self.device)
                 input_ids = encoded_inputs["input_ids"]
                 attention_mask = encoded_inputs["attention_mask"]
 
-                unwrapped_model = self.accelerator.unwrap_model(self.model)
-
                 # 获取 GNN 输出
+                unwrapped_model = self.accelerator.unwrap_model(self.model)
                 h_change, _ = unwrapped_model.multimodal_emotion_gnn(batched_graph)
 
                 # 生成预测 token IDs
@@ -296,86 +324,91 @@ class Trainer:
                     repetition_penalty=self.config.cfg_train.repetition_penalty,
                 )
 
-                # 关键的切片处理：只保留模型生成的输出部分
                 prompt_length = input_ids.shape[1]
                 sliced_generated_ids = []
                 for i in range(generated_ids.shape[0]):
-                    # 移除 prompt 部分，只保留生成的新 tokens
                     sliced_generated_ids.append(generated_ids[i, prompt_length:])
-
                 all_predictions_ids.extend(sliced_generated_ids)
 
-                # 只有在训练/验证模式下才处理损失和参考
                 if is_train_val_mode:
                     all_label_texts_for_eval.extend(label_texts_for_supervision)
 
-                    # 编码 label 文本用于损失计算
-                    encoded_labels = self.tokenizer(
-                        label_texts_for_supervision,
+                    # 拼接 prompt + label 用于 input_ids & labels
+                    prompt_label_texts = [
+                        p + l for p, l in zip(prompt_texts, label_texts_for_supervision)
+                    ]
+
+                    encoded = self.tokenizer(
+                        prompt_label_texts,
                         return_tensors="pt",
                         padding="max_length",
                         truncation=True,
-                        max_length=512,
+                        max_length=1024,
                     ).to(self.device)
-                    labels = encoded_labels["input_ids"]
-                    labels = torch.where(
-                        labels == self.tokenizer.pad_token_id, -100, labels
-                    )
+                    full_input_ids = encoded["input_ids"]
+                    full_attention_mask = encoded["attention_mask"]
 
-                    # 计算损失
+                    # 编码 prompt 单独用于 mask 掉 prompt 部分
+                    with self.tokenizer.as_target_tokenizer():
+                        encoded_prompt_only = self.tokenizer(
+                            prompt_texts,
+                            return_tensors="pt",
+                            padding="max_length",
+                            truncation=True,
+                            max_length=1024,
+                        ).to(self.device)
+
+                    labels = full_input_ids.clone()
+                    prompt_lengths = (encoded_prompt_only["attention_mask"] == 1).sum(dim=1)
+                    for i, prompt_len in enumerate(prompt_lengths):
+                        labels[i, :prompt_len] = -100
+
+                    # 前向传播，计算损失
                     outputs = self.model(
-                        input_ids=input_ids,
-                        attention_mask=attention_mask,
+                        input_ids=full_input_ids,
+                        attention_mask=full_attention_mask,
                         batched_graph=batched_graph,
                         labels=labels,
                     )
                     all_loss.append(outputs["loss"].item())
 
-        # 在所有进程上收集结果 (在循环结束后，一次性进行)
+        # 收集分布式进程的预测结果
         if self.accelerator.is_main_process:
-            all_predictions_gathered = self.accelerator.gather_for_metrics(
-                all_predictions_ids
-            )
+            all_predictions_gathered = self.accelerator.gather_for_metrics(all_predictions_ids)
+
         metrics = {}
-        # 只有在训练/验证模式下才计算这些指标
         if all_label_texts_for_eval:
-            all_references_gathered = self.accelerator.gather_for_metrics(
-                all_label_texts_for_eval
-            )
+            all_references_gathered = self.accelerator.gather_for_metrics(all_label_texts_for_eval)
             all_loss_gathered = self.accelerator.gather_for_metrics(all_loss)
 
-            # 在主进程上计算指标
             if self.accelerator.is_main_process:
-                # 解码切片后的预测：使用 evaluator 提供的解码方法
-                decoded_predictions = self.evaluator.decode_generated_tokens(
-                    all_predictions_gathered
-                )
+                decoded_predictions = self.evaluator.decode_generated_tokens(all_predictions_gathered)
+                print(f"Decoded Predictions for a sample: {decoded_predictions[0]}")
 
                 metrics = self.evaluator.compute_metrics(
-                    predictions=decoded_predictions,  # 传入带标签的多行纯文本
-                    references=all_references_gathered,  # 传入带标签的多行纯文本
+                    predictions=decoded_predictions,
+                    references=all_references_gathered,
                 )
 
                 avg_eval_loss = torch.tensor(all_loss_gathered).mean().item()
                 metrics["eval_loss"] = round(avg_eval_loss, 4)
 
             return metrics
-        else:  # 测试模式，不计算损失和复杂指标
+
+        else:
             if self.accelerator.is_main_process:
-                # 解码切片后的预测，这里也使用 evaluator 的解码方法
-                decoded_predictions = self.evaluator.decode_generated_tokens(
-                    all_predictions_gathered
-                )
+                decoded_predictions = self.evaluator.decode_generated_tokens(all_predictions_gathered)
                 metrics["generated_texts"] = decoded_predictions
             return metrics
+
 
     def train(self):
         # 用于动态验证起始的属性
         train_loss_history = []
         stable_loss_epochs = 0
         validation_started = False
-        loss_stability_window = 3
-        loss_stability_threshold = 0.005
+        loss_stability_window = 2
+        loss_stability_threshold = 1.00
         for epoch in range(self.config.cfg_train.num_train_epochs):
             if self.accelerator.is_main_process:
                 print(f"\nEpoch {epoch + 1}/{self.config.cfg_train.num_train_epochs}")
