@@ -208,68 +208,116 @@ class Trainer:
             disable=not self.accelerator.is_local_main_process,
         )
 
-        for batch_idx, batch in enumerate(progress_bar): # 添加 batch_idx
+        for batch_idx, batch in enumerate(progress_bar):
             batched_graph = batch[0]
             prompt_texts = batch[1]
             label_texts = batch[2]
 
-            # 拼接 prompt + label
-            prompt_label_texts = [p + l for p, l in zip(prompt_texts, label_texts)]
+            # --- 步骤 1: 准备输入和长度信息 ---
+            prompt_tokenized = self.tokenizer(prompt_texts, add_special_tokens=False)
+            label_tokenized = self.tokenizer(
+                [l + self.tokenizer.eos_token for l in label_texts], add_special_tokens=False
+            )
+            prompt_lens = [len(p) for p in prompt_tokenized['input_ids']]
+            input_ids_list = [
+                p + l for p, l in zip(prompt_tokenized['input_ids'], label_tokenized['input_ids'])
+            ]
 
-            # 编码拼接后的输入（用于 input_ids 和 labels）
-            encoded_inputs = self.tokenizer(
-                prompt_label_texts,
-                return_tensors="pt",
-                padding="max_length",
-                truncation=True,
+            # --- 步骤 2: 填充和张量化 ---
+            padded_result = self.tokenizer.pad(
+                {'input_ids': input_ids_list},
+                padding='longest',
                 max_length=1024,
+                return_tensors='pt',
             ).to(self.device)
+            input_ids = padded_result.input_ids
+            attention_mask = padded_result.attention_mask
 
-            input_ids = encoded_inputs["input_ids"]
-            attention_mask = encoded_inputs["attention_mask"]
-
-            # 编码 prompt，用于构造 labels 的 mask
-            encoded_prompts = self.tokenizer(
-                    prompt_texts,
-                    return_tensors="pt",
-                    padding="max_length",
-                    truncation=True,
-                    max_length=1024, # 确保这里的max_length与上面一致
-                ).to(self.device)
-
-            # 构造 labels：prompt 部分为 -100，label 部分为目标
+            # --- 步骤 3: 构建 labels ---
             labels = input_ids.clone()
-            prompt_lengths = (encoded_prompts["attention_mask"] == 1).sum(dim=1)
+            for i in range(len(labels)):
+                padding_len = (attention_mask[i] == 0).sum().item()
+                mask_len = padding_len + prompt_lens[i]
+                if mask_len < labels.shape[1]:
+                    labels[i, :mask_len] = -100
 
-            
+            # ====================================================================
+            # =======================  第一级调试代码开始  =========================
+            # ====================================================================
+            # if batch_idx == 0 and self.accelerator.is_main_process:
+            #     print("\n\n========================= START OF BATCH 0 DEBUG (NEW LOGIC) =========================")
+            #     # 选择第一个样本进行深入分析
+            #     i = 0
+                
+            #     # --- 1. 原始文本 ---
+            #     print("\n[1.1] RAW PROMPT TEXT:")
+            #     print(prompt_texts[i])
+            #     print("-" * 20)
+            #     print("\n[1.2] RAW LABEL TEXT:")
+            #     print(label_texts[i])
+            #     print("-" * 20)
+                
+            #     # --- 2. 拼接与编码后的结果 ---
+            #     print("\n[2.1] FULL INPUT DECODED (from input_ids):")
+            #     full_decoded = self.tokenizer.decode(input_ids[i], skip_special_tokens=False)
+            #     print(full_decoded)
+            #     print("-" * 20)
 
-            for i, prompt_len in enumerate(prompt_lengths):
-                # 确保 prompt_len 不会超过 labels 的维度
-                if prompt_len > labels.shape[1]:
-                    print(f"WARNING: prompt_len {prompt_len} exceeds labels.shape[1] {labels.shape[1]} for sample {i}")
-                    prompt_len = labels.shape[1] # 截断以避免索引错误
-                labels[i, :prompt_len] = -100  # 屏蔽 prompt 部分
+            #     # --- 3. 标签屏蔽逻辑验证 ---
+            #     padding_len = (attention_mask[i] == 0).sum().item()
+            #     prompt_len = prompt_lens[i]
+            #     mask_len = padding_len + prompt_len
+            #     print(f"\n[3.1] Calculated lengths for sample {i}: padding_len={padding_len}, prompt_len={prompt_len}, total_mask_len={mask_len}")
+                
+            #     # 解码被屏蔽为-100的部分 (应该是 Padding + Prompt)
+            #     masked_part_ids = input_ids[i][labels[i] == -100]
+            #     decoded_masked_part = self.tokenizer.decode(masked_part_ids, skip_special_tokens=False)
+            #     print("\n[3.2] DECODED MASKED PART (what model should IGNORE for loss):")
+            #     print(decoded_masked_part)
+            #     print("-" * 20)
 
-            
+            #     # 解码需要计算损失的部分 (应该是 Label + EOS)
+            #     unmasked_part_ids = input_ids[i][labels[i] != -100]
+            #     decoded_unmasked_part = self.tokenizer.decode(unmasked_part_ids, skip_special_tokens=False)
+            #     print("\n[3.3] DECODED UNMASKED PART (what model should LEARN for loss):")
+            #     print(decoded_unmasked_part)
+            #     print("-" * 20)
+                
+            #     # “标准答案”：直接对原始label文本进行分词
+            #     original_label_plus_eos = label_texts[i] + self.tokenizer.eos_token
+            #     decoded_original_label = self.tokenizer.decode(
+            #         self.tokenizer(original_label_plus_eos, add_special_tokens=False)['input_ids'],
+            #         skip_special_tokens=False
+            #     )
+            #     print("\n[3.4] FOR COMPARISON: ORIGINAL LABEL TOKENIZED AND DECODED:")
+            #     print(decoded_original_label)
+            #     print("-" * 20)
 
-            # 模型前向传播（含 batched_graph 注入）
+            #     # --- 4. 最终断言 ---
+            #     # 移除解码后可能产生的空格或特殊前缀，进行更鲁棒的比较
+            #     if decoded_unmasked_part.strip() == decoded_original_label.strip():
+            #         print("\n[4.1] VERDICT: SUCCESS! The masking logic appears to be correct. [3.3] matches [3.4].")
+            #     else:
+            #         print("\n[4.1] VERDICT: FAILED! The masking logic is flawed. [3.3] does NOT match [3.4].")
+            #     print("========================= END OF BATCH 0 DEBUG (NEW LOGIC) =========================")
+            # ====================================================================
+            # ========================  第一级调试代码结束  ========================
+            # ====================================================================
+
+            # --- 步骤 4: 模型前向传播和优化 ---
             outputs = self.model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
-                batched_graph=batched_graph, # 确认 batched_graph 类型和形状是否正确
+                batched_graph=batched_graph,
                 labels=labels,
             )
 
             loss = outputs.loss
 
-            
-
-            # 反向传播与优化
             self.accelerator.backward(loss)
+            
             if self.config.cfg_train.max_grad_norm > 0:
-                self.accelerator.clip_grad_norm_(
-                    self.model.parameters(), self.config.cfg_train.max_grad_norm
-                )
+                self.accelerator.clip_grad_norm_(self.model.parameters(), self.config.cfg_train.max_grad_norm)
 
             self.optimizer.step()
             self.lr_scheduler.step()
@@ -279,14 +327,13 @@ class Trainer:
             progress_bar.set_postfix({"loss": f"{loss.item():.4f}"})
 
         avg_loss = total_loss / len(self.train_dataloader)
-        # print(f"\n--- DEBUG: End of Epoch, Average Loss: {avg_loss:.4f} ---") # 打印最终平均损失
         return avg_loss
 
     def _evaluate(self):
         self.model.eval()
         all_predictions_ids = []
         all_loss = []
-        all_label_texts_for_eval = [] # 这是每个进程本地收集的，最后会统一到主进程
+        all_label_texts_for_eval = []
 
         eval_progress_bar = tqdm(
             self.eval_dataloader,
@@ -294,141 +341,137 @@ class Trainer:
             disable=not self.accelerator.is_local_main_process,
         )
 
-        for batch_data in eval_progress_bar:
+        for batch_idx, batch_data in enumerate(eval_progress_bar): #
             with torch.no_grad():
-                batched_graph = None
-                prompt_texts = None
-                label_texts_for_supervision = None
-                is_train_val_mode = len(batch_data) == 3  # train/val 模式
+                is_train_val_mode = len(batch_data) == 3
 
                 if is_train_val_mode:
                     batched_graph, prompt_texts, label_texts_for_supervision = batch_data
                 else:
-                    batched_graph, prompt_texts = batch_data
+                    batched_graph, prompt_texts = batch_data, None
+                
                 batched_graph = batched_graph.to(self.device)
 
-                encoded_inputs = self.tokenizer(
+                # --- 1. 生成部分 (Generation) ---
+                encoded_prompts_for_gen = self.tokenizer(
                     prompt_texts,
                     return_tensors="pt",
-                    padding="max_length",
+                    padding='longest',
                     truncation=True,
-                    max_length=512,
+                    max_length=1024,
                 ).to(self.device)
-                input_ids = encoded_inputs["input_ids"]
-                attention_mask = encoded_inputs["attention_mask"]
+                
+                input_ids_for_gen = encoded_prompts_for_gen["input_ids"]
+                attention_mask_for_gen = encoded_prompts_for_gen["attention_mask"]
 
                 unwrapped_model = self.accelerator.unwrap_model(self.model)
                 h_change, _ = unwrapped_model.multimodal_emotion_gnn(batched_graph)
 
                 generated_ids = unwrapped_model.generate(
-                    input_ids=input_ids,
-                    attention_mask=attention_mask,
-                    # batched_graph=batched_graph,
+                    input_ids=input_ids_for_gen,
+                    attention_mask=attention_mask_for_gen,
                     h_change=h_change,
-                    pad_token_id=self.tokenizer.pad_token_id, 
+                    pad_token_id=self.tokenizer.pad_token_id,
                     max_new_tokens=self.config.cfg_train.max_new_tokens,
-                    num_beams=self.config.cfg_train.num_beams,
-                    do_sample=self.config.cfg_train.do_sample,
-                    temperature=self.config.cfg_train.temperature,
-                    top_p=self.config.cfg_train.top_p,
-                    top_k=self.config.cfg_train.top_k,
-                    repetition_penalty=self.config.cfg_train.repetition_penalty,
+                    # ... 其他生成参数
                 )
-                prompt_length = input_ids.shape[1]
-                sliced_generated_ids = []
-                for i in range(generated_ids.shape[0]):
-
-                    sliced_ids = generated_ids[i, prompt_length:].tolist() # 转换为 Python list
-                    sliced_generated_ids.append(sliced_ids)
                 
+                prompt_length = input_ids_for_gen.shape[1]
+                sliced_generated_ids = [gen_ids[prompt_length:].tolist() for gen_ids in generated_ids]
+                all_predictions_ids.extend(sliced_generated_ids)
 
-                all_predictions_ids.extend(sliced_generated_ids) # 这是每个进程本地收集的列表
-
+                # --- 2. 损失计算部分 (Loss Calculation) ---
                 if is_train_val_mode:
-                    # **在此处对 label_texts_for_supervision 进行初步清理，防止空字符串或特殊字符**
-                    # 例如，去除前后空白，并确保非空
-                    cleaned_label_texts = [
-                        txt.strip() if txt and txt.strip() else "[EMPTY_LABEL_PLACEHOLDER]"
-                        for txt in label_texts_for_supervision
-                    ]
+                    # 应用和 _train_epoch 中完全相同的、已修正的标签屏蔽逻辑
+                    prompt_tokenized = self.tokenizer(prompt_texts, add_special_tokens=False)
+                    label_tokenized = self.tokenizer([l + self.tokenizer.eos_token for l in label_texts_for_supervision], add_special_tokens=False)
+                    prompt_lens = [len(p) for p in prompt_tokenized['input_ids']]
+                    input_ids_list = [p + l for p, l in zip(prompt_tokenized['input_ids'], label_tokenized['input_ids'])]
+
+                    padded_result = self.tokenizer.pad(
+                        {'input_ids': input_ids_list},
+                        padding='longest', max_length=1024, return_tensors='pt'
+                    ).to(self.device)
+                    
+                    full_input_ids = padded_result.input_ids
+                    full_attention_mask = padded_result.attention_mask
+
+                    labels = full_input_ids.clone()
+                    for i in range(len(labels)):
+                        padding_len = (full_attention_mask[i] == 0).sum().item()
+                        mask_len = padding_len + prompt_lens[i]
+                        if mask_len < labels.shape[1]:
+                            labels[i, :mask_len] = -100
+
+                    # ====================================================================
+                    # ==============  EVALUATION BATCH 0 DEBUGGING START ==============
+                    # ====================================================================
+                    if batch_idx == 0 and self.accelerator.is_main_process:
+                        print("\n\n========================= START OF EVAL BATCH 0 DEBUG =========================")
+                        i = 0 # 只检查第一个样本
+                        
+                        # --- 1. 原始文本 ---
+                        print("\n[EVAL-1.1] RAW PROMPT TEXT:")
+                        print(prompt_texts[i])
+                        print("\n[EVAL-1.2] RAW LABEL TEXT:")
+                        print(label_texts_for_supervision[i])
+                        print("-" * 20)
+                        
+                        # --- 2. 标签屏蔽逻辑验证 ---
+                        padding_len = (full_attention_mask[i] == 0).sum().item()
+                        prompt_len = prompt_lens[i]
+                        mask_len = padding_len + prompt_len
+                        print(f"\n[EVAL-2.1] Calculated lengths for sample {i}: padding_len={padding_len}, prompt_len={prompt_len}, total_mask_len={mask_len}")
+                        
+                        masked_ids = full_input_ids[i][labels[i] == -100]
+                        decoded_masked = self.tokenizer.decode(masked_ids, skip_special_tokens=False)
+                        print(f"\n[EVAL-2.2] DECODED MASKED PART (for loss):\n{decoded_masked}")
+                        
+                        unmasked_ids = full_input_ids[i][labels[i] != -100]
+                        decoded_unmasked = self.tokenizer.decode(unmasked_ids, skip_special_tokens=False)
+                        print(f"\n[EVAL-2.3] DECODED UNMASKED PART (for loss):\n{decoded_unmasked}")
+                        print("-" * 20)
+                        
+                        # --- 3. 生成结果解码 ---
+                        # 解码由 model.generate() 产生的结果
+                        decoded_prediction_single = self.tokenizer.decode(sliced_generated_ids[i], skip_special_tokens=True)
+                        print(f"\n[EVAL-3.1] DECODED GENERATED TEXT (for metrics):\n{decoded_prediction_single}")
+                        print("========================= END OF EVAL BATCH 0 DEBUG =========================")
+                    # ===================================================================
+                    # ================  EVALUATION BATCH 0 DEBUGGING END ================
+                    # ===================================================================
+
+                    outputs = self.model(
+                        input_ids=full_input_ids, attention_mask=full_attention_mask,
+                        batched_graph=batched_graph, h_change=h_change, labels=labels
+                    )
+                    all_loss.append(outputs.loss.item())
+
+                    cleaned_label_texts = [txt.strip() if txt and txt.strip() else "[EMPTY]" for txt in label_texts_for_supervision]
                     all_label_texts_for_eval.extend(cleaned_label_texts)
 
-                    # 损失计算部分保持不变
-                    prompt_label_texts = [
-                        p + l for p, l in zip(prompt_texts, label_texts_for_supervision)
-                    ]
-                    encoded = self.tokenizer(
-                        prompt_label_texts,
-                        return_tensors="pt",
-                        padding="max_length",
-                        truncation=True,
-                        max_length=1024,
-                    ).to(self.device)
-                    full_input_ids = encoded["input_ids"]
-                    full_attention_mask = encoded["attention_mask"]
-                    encoded_prompt_only = self.tokenizer(
-                            prompt_texts,
-                            return_tensors="pt",
-                            padding="max_length",
-                            truncation=True,
-                            max_length=1024,
-                        ).to(self.device)
-                    labels = full_input_ids.clone()
-                    prompt_lengths = (encoded_prompt_only["attention_mask"] == 1).sum(dim=1)
-                    for i, prompt_len in enumerate(prompt_lengths):
-                        labels[i, :prompt_len] = -100
-                    outputs = self.model(
-                        input_ids=full_input_ids,
-                        attention_mask=full_attention_mask,
-                        batched_graph=batched_graph,
-                        labels=labels,
-                    )
-                    all_loss.append(outputs["loss"].item())
-
+        # --- 3. 指标聚合与计算部分 (Metrics Aggregation) ---
         metrics = {}
-        # **所有 gather_for_metrics 操作都应该在所有进程上执行，然后只在主进程上处理结果**
-        # 这是 accelerate 的设计，它会在底层同步和收集
-        # all_predictions_ids 是 List[List[int]]
         all_predictions_gathered = self.accelerator.gather_for_metrics(all_predictions_ids)
         
-        # all_label_texts_for_eval 是 List[str]
-        # all_references_gathered 应该包含所有进程的 label_texts，
-        # 即使某个进程的 all_label_texts_for_eval 暂时为空，gather 操作也会正确同步
-        if all_label_texts_for_eval: # 仅当有标注数据时才进行指标计算
+        if all_label_texts_for_eval:
             all_references_gathered = self.accelerator.gather_for_metrics(all_label_texts_for_eval)
             all_loss_gathered = self.accelerator.gather_for_metrics(all_loss)
             
             if self.accelerator.is_main_process:
-                # 在主进程进行解码和指标计算
                 decoded_predictions = self.evaluator.decode_generated_tokens(all_predictions_gathered)
-
-                # **在此处添加调试打印和空字符串检查，此时数据是完整的**
-                print(f"\n[Rank {self.accelerator.process_index}] --- DEBUG: Formatted Texts for Metrics ---")
-                print(f"[Rank {self.accelerator.process_index}] Sample decoded_predictions (first 5): {decoded_predictions[:5]}")
-                print(f"[Rank {self.accelerator.process_index}] Sample all_references_gathered (first 5): {all_references_gathered[:5]}")
-
-                empty_decoded_preds = [i for i, s in enumerate(decoded_predictions) if not s.strip()]
-                empty_gathered_refs = [i for i, s in enumerate(all_references_gathered) if not s.strip()]
-                if empty_decoded_preds:
-                    print(f"[Rank {self.accelerator.process_index}] WARNING: decoded_predictions contains empty strings at indices: {empty_decoded_preds}")
-                if empty_gathered_refs:
-                    print(f"[Rank {self.accelerator.process_index}] WARNING: all_references_gathered contains empty strings at indices: {empty_gathered_refs}")
-                print(f"[Rank {self.accelerator.process_index}] --- END DEBUG: Formatted Texts for Metrics ---")
-
-
-                print(f"Decoded Predictions for a sample (first): {decoded_predictions[0]}") # 打印第一个
-                print(f"References for a sample (first): {all_references_gathered[0]}") # 打印第一个
-
+                
+                # 你之前的详细打印，这里保留
+                print(f"\n--- DEBUG (Main Process): Formatted Texts for Metrics ---")
+                print(f"Sample decoded_predictions (first 5): {decoded_predictions[:5]}")
+                print(f"Sample all_references_gathered (first 5): {all_references_gathered[:5]}")
+                
                 metrics = self.evaluator.compute_metrics(
-                    predictions=decoded_predictions,
-                    references=all_references_gathered, # references 是 Dict 列表，Evaluator 内部会处理
+                    predictions=decoded_predictions, references=all_references_gathered,
                 )
-
                 avg_eval_loss = torch.tensor(all_loss_gathered).mean().item()
                 metrics["eval_loss"] = round(avg_eval_loss, 4)
 
-        # 无论有没有 is_train_val_mode，最终都应该返回 metrics
-        # 确保所有进程都执行到这里，即使只有主进程返回真正的 metrics dict
         return metrics if self.accelerator.is_main_process else {}
 
     def train(self):
