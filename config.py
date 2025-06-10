@@ -58,7 +58,7 @@ class config_dataset_dataloader:
 class config_train:
     # ===配置训练参数===#
     num_train_epochs: int = 100 # 训练轮数
-    learning_rate: float = 5e-4  # 学习率
+    learning_rate: float = 2e-5  # 学习率
     weight_decay: float = 0.01  # 权重衰减
     warmup_ratio: float = 0.1 # 预热率
     accumulation_steps: int = 2  # 梯度累积步数
@@ -73,6 +73,7 @@ class config_train:
     top_k: int = 0            # 与 top_p 配合使用时，通常设为0
     repetition_penalty: float = 1.2 # 适度惩罚重复，防止回应过于机械或陷入循环
     # ===早停参数===#
+    start_eval_epoch:int =2 #开始验证epoch
     patience: int = 3  # 早停轮数
     min_delta: float = 0.001  # 早停最小变化
     # ===配置模型保存===#

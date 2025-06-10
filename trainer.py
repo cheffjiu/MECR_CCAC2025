@@ -432,173 +432,85 @@ class Trainer:
         return metrics if self.accelerator.is_main_process else {}
 
     def train(self):
-        # 用于动态验证起始的属性
-        train_loss_history = []
-        stable_loss_epochs = 0
-        validation_started = False
-        loss_stability_window = 3
-        loss_stability_threshold = 0.1
+        
+        # 开始训练循环
         for epoch in range(self.config.cfg_train.num_train_epochs):
+            # 打印当前 Epoch 信息
             if self.accelerator.is_main_process:
                 print(f"\nEpoch {epoch + 1}/{self.config.cfg_train.num_train_epochs}")
 
+            # --- 1. 训练一个 Epoch ---
             train_loss = self._train_epoch()
             if self.accelerator.is_main_process:
                 print(f"训练损失: {train_loss:.4f}")
 
-            train_loss_history.append(train_loss)
-
-            # --- 动态判断是否开始验证和保存 ---
-            # 只有当验证尚未开始时才进行判断
-            if not validation_started:
-                # 确保有足够的历史数据来判断稳定性
-                if len(train_loss_history) >= loss_stability_window:
-                    # 获取最近 N 个 epoch 的损失
-                    recent_losses = train_loss_history[-loss_stability_window:]
-                    # 计算最近 N 个 epoch 损失的最大波动
-                    # 注意：如果损失是浮点数，直接计算 min/max 可能不够鲁棒
-                    # 更稳健的方式是计算标准差或平均绝对误差
-                    max_loss_fluctuation = max(recent_losses) - min(recent_losses)
-
-                    if self.accelerator.is_main_process:
-                        print(
-                            f"DEBUG: 最近 {loss_stability_window } 个 epoch 损失波动: {max_loss_fluctuation:.4f}"
-                        )
-
-                    if max_loss_fluctuation < loss_stability_threshold:
-                        stable_loss_epochs += 1
-                        if self.accelerator.is_local_main_process:  # 确保只在主进程打印
-                            print(
-                                f"DEBUG: 训练损失趋于稳定。连续稳定 Epoch 数: {stable_loss_epochs}"
-                            )
-                    else:
-                        stable_loss_epochs = 0  # 波动超过阈值，重置计数器
-
-                    # 如果连续稳定达到一定次数，则开始验证
-                    if (
-                        stable_loss_epochs >= loss_stability_window
-                    ):  # 假设连续稳定 window 次后开始验证
-                        validation_started = True
-                        if self.accelerator.is_main_process:
-                            print(
-                                f"**训练损失已趋于稳定，从 Epoch {epoch + 1} 开始进行验证和模型保存。**"
-                            )
-
-            # --- 验证和保存逻辑 (只有当 validation_started 为 True 时才执行) ---
-            if validation_started:
-                # 每个 Epoch 结束时保存一次模型 (主进程)
-                if self.accelerator.is_main_process:
-                    epoch_save_dir = os.path.join(self.output_dir, f"epoch_{epoch + 1}")
-                    os.makedirs(epoch_save_dir, exist_ok=True)
-
-                    # 1. 解包所有经过 accelerator.prepare 包装过的主模型
-                    unwrapped_model = self.accelerator.unwrap_model(self.model)
-
-                    # 2. 保存 LoRA 适配器 (QwenWithInjection 是 PeftModel 的实例)
-                    print(f"保存 LoRA 适配器到 {epoch_save_dir}/lora_adapters...")
-                    unwrapped_model.save_pretrained(
-                        os.path.join(epoch_save_dir, "lora_adapters")
-                    )
-
-                    # 3. 保存 InjectionModule 的参数 (通过主模型访问其子模块)
-                    print(
-                        f"保存 InjectionModule 参数到 {epoch_save_dir}/injection_module.pt..."
-                    )
-                    torch.save(
-                        unwrapped_model.injection_module.state_dict(),
-                        os.path.join(epoch_save_dir, "injection_module.pt"),
-                    )
-
-                    # 4. 保存 MultimodalEmotionGNN 的参数 (通过主模型访问其子模块)
-                    print(
-                        f"保存 MultimodalEmotionGNN 参数到 {epoch_save_dir}/multimodal_emotion_gnn.pt..."
-                    )
-                    torch.save(
-                        unwrapped_model.multimodal_emotion_gnn.state_dict(),
-                        os.path.join(epoch_save_dir, "multimodal_emotion_gnn.pt"),
-                    )
-                    print(f"模型组件已保存到 {epoch_save_dir}")
-
-                # **等待所有进程同步，然后进行评估**
+            # --- 2. 验证和早停判断 ---
+            current_epoch_num = epoch + 1
+            
+            # 根据配置决定是否进行验证
+            if current_epoch_num >= self.config.cfg_train.start_eval_epoch:
+                
+                # --- 2.1. 执行评估 ---
+                # 等待所有进程完成训练步骤
                 self.accelerator.wait_for_everyone()
-
                 eval_metrics = self._evaluate()
 
-                # 只有主进程处理评估结果和早停逻辑
+                # --- 2.2. 主进程处理结果、保存模型和早停判断 ---
                 if self.accelerator.is_main_process:
                     print(f"验证指标: {eval_metrics}")
 
-                    current_eval_score = eval_metrics.get(
-                        "score_sum", float("-inf")
-                    )  # 假设 score_sum 是你的主要评估指标
+                    # 获取当前epoch的评估分数
+                    current_eval_score = eval_metrics.get("score_sum", float("-inf"))
 
-                    if (
-                        current_eval_score
-                        > self.best_eval_score + self.config.cfg_train.min_delta
-                    ):  # 假设 min_delta 也在 config 里
-                        print(
-                            f"验证分数改善 ({self.best_eval_score:.4f} -> {current_eval_score:.4f})，保存最佳模型..."
-                        )
+                    # 检查性能是否改善
+                    if current_eval_score > self.best_eval_score + self.config.cfg_train.min_delta:
+                        print(f"验证分数改善 ({self.best_eval_score:.4f} -> {current_eval_score:.4f})，保存最佳模型...")
                         self.best_eval_score = current_eval_score
                         self.epochs_no_improve = 0
 
-                        # 最佳模型保存 (只保存最佳的 LoRA, InjectionModule 和 GNN 模块)
-                        best_model_save_dir = os.path.join(
-                            self.output_dir, "best_model"
-                        )
+                        # 定义最佳模型的保存路径
+                        best_model_save_dir = os.path.join(self.output_dir, "best_model")
                         os.makedirs(best_model_save_dir, exist_ok=True)
 
-                        # 再次解包确保获取当前最佳模型的未包装版本
+                        # 解包以获取原始模型
                         unwrapped_model = self.accelerator.unwrap_model(self.model)
 
-                        # 1. 保存最佳 LoRA 适配器
-                        print(
-                            f"保存最佳 LoRA 适配器到 {best_model_save_dir}/lora_adapters..."
-                        )
-                        unwrapped_model.save_pretrained(
-                            os.path.join(best_model_save_dir, "lora_adapters")
-                        )
-
-                        # 2. 保存最佳 InjectionModule 的参数
-                        print(
-                            f"保存最佳 InjectionModule 参数到 {best_model_save_dir}/injection_module.pt..."
-                        )
-                        torch.save(
-                            unwrapped_model.injection_module.state_dict(),
-                            os.path.join(best_model_save_dir, "injection_module.pt"),
-                        )
-
-                        # 3. 保存最佳 MultimodalEmotionGNN 的参数
-                        print(
-                            f"保存最佳 MultimodalEmotionGNN 参数到 {best_model_save_dir}/multimodal_emotion_gnn.pt..."
-                        )
-                        torch.save(
-                            unwrapped_model.multimodal_emotion_gnn.state_dict(),
-                            os.path.join(
-                                best_model_save_dir, "multimodal_emotion_gnn.pt"
-                            ),
-                        )
+                        # 保存所有可训练的组件
+                        # a. 保存 LoRA 适配器
+                        print(f"保存最佳 LoRA 适配器到 {best_model_save_dir}/lora_adapters...")
+                        unwrapped_model.save_pretrained(os.path.join(best_model_save_dir, "lora_adapters"))
+                        # b. 保存 InjectionModule
+                        print(f"保存最佳 InjectionModule 参数到 {best_model_save_dir}/injection_module.pt...")
+                        torch.save(unwrapped_model.injection_module.state_dict(), os.path.join(best_model_save_dir, "injection_module.pt"))
+                        # c. 保存 MultimodalEmotionGNN
+                        print(f"保存最佳 MultimodalEmotionGNN 参数到 {best_model_save_dir}/multimodal_emotion_gnn.pt...")
+                        torch.save(unwrapped_model.multimodal_emotion_gnn.state_dict(), os.path.join(best_model_save_dir, "multimodal_emotion_gnn.pt"))
+                        
                         print(f"最佳模型组件已保存到：{best_model_save_dir}")
 
                     else:
                         self.epochs_no_improve += 1
-                        print(
-                            f"验证分数未改善。连续无改善 Epoch 数: {self.epochs_no_improve}/{self.patience}"
-                        )
+                        print(f"验证分数未改善。连续无改善 Epoch 数: {self.epochs_no_improve}/{self.patience}")
 
+                    # 触发早停
                     if self.epochs_no_improve >= self.patience:
                         print(f"早停触发！连续 {self.patience} 个 Epoch 未见改善。")
-                        break
-            else:
-                # 如果不进行验证和保存，确保在每个 epoch 结束时所有进程都同步
-                if self.accelerator.is_main_process:
-                    print(f"Epoch {epoch + 1}：训练损失仍在下降，跳过验证和模型保存。")
+                        # 使用 self.accelerator.end_training() 来优雅地处理多进程同步和退出
+                        self.accelerator.end_training()
+                        break # 跳出训练循环
 
-            # 在每个 epoch 结束时等待所有进程同步，即使不进行验证
+            else: # 如果还没到开始验证的 epoch
+                if self.accelerator.is_main_process:
+                    print(f"Epoch {current_epoch_num}：初步训练中，将在 Epoch {self.config.cfg_train.start_eval_epoch} 后开始验证。")
+
+            # 在每个 epoch 结束时等待所有进程同步，这对于早停的 break 尤其重要
             self.accelerator.wait_for_everyone()
 
+        # --- 训练循环结束 ---
         if self.accelerator.is_main_process:
-            print("训练结束。")
-            print(
-                f"最终最佳模型所有组件已保存到：{os.path.join(self.output_dir, 'best_model')}"
-            )
+            print("\n训练结束。")
+            # 检查最佳模型是否曾被保存过
+            if self.best_eval_score > float("-inf"):
+                print(f"最终最佳模型（score_sum: {self.best_eval_score:.4f}）的所有组件已保存到：{os.path.join(self.output_dir, 'best_model')}")
+            else:
+                print("训练过程中没有产生有效的最佳模型。")
