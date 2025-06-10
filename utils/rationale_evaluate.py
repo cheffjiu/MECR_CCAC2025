@@ -152,7 +152,7 @@ class RationaleEvaluator:
         self,
         predictions: List[str],  # 预测是LLM直接输出的带标签多行纯文本字符串列表
         references: List[
-            Dict
+            str
         ],  # 参考是原始 JSON 格式的 rationale 字典列表 (来自您的数据加载器)
     ) -> Dict[str, float]:
         """
@@ -171,7 +171,7 @@ class RationaleEvaluator:
 
         # references 是原始 JSON 字典，也需要通过 prepare_for_evaluation 格式化
         ref_texts = [self.prepare_for_evaluation(r_dict) for r_dict in references]
-
+        
         # 确保预测和参考数量一致
         if len(pred_texts) != len(ref_texts):
             print(

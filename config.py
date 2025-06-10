@@ -28,7 +28,7 @@ class config_model:
     injection_dropout: float = 0.1  # 丢弃率
     #===LLM参数配置====#
     llm_name: str = "Qwen/Qwen3-0.6B"  # 模型名称或路径
-    tokenizer_name:str="Qwen/Qwen3-0.6B"
+    llm_tokenizer_name:str="Qwen/Qwen3-0.6B"
     
 
 @dataclass
@@ -50,8 +50,8 @@ class config_dataset_dataloader:
     )
     feature_root_val: str = os.path.join(project_root, "data/feature/val")
     # ===配置dataloader参数===#
-    batch_size: int = 12 # 批大小
-    num_workers: int = 8 # 工作进程数
+    batch_size: int = 2# 批大小
+    num_workers: int = 16 # 工作进程数
 
 
 @dataclass
@@ -68,13 +68,12 @@ class config_train:
     max_new_tokens: int = 120 # 根据情感回应的典型长度调整，例如 80-120 词
     num_beams: int = 1        # 采样模式下通常设为1，不使用束搜索
     do_sample: bool = True    # 启用采样，增加回应多样性
-
     temperature: float = 0.8  # 略低于1，确保一定随机性但不过于发散
     top_p: float = 0.9        # 常用且效果好的 Top-P 值，在保证质量的同时增加多样性
     top_k: int = 0            # 与 top_p 配合使用时，通常设为0
     repetition_penalty: float = 1.2 # 适度惩罚重复，防止回应过于机械或陷入循环
     # ===早停参数===#
-    patience: int = 5  # 早停轮数
+    patience: int = 3  # 早停轮数
     min_delta: float = 0.001  # 早停最小变化
     # ===配置模型保存===#
     model_save_path: str = os.path.join(
