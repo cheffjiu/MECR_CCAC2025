@@ -83,7 +83,6 @@ class QwenWithInjection(PreTrainedModel, GenerationMixin):
             else self.config.output_hidden_states
         )
         #获取h_change
-        h_change = None
         if h_change is None and batched_graph is not None:
             h_change, _ = self.multimodal_emotion_gnn(batched_graph)
             # print(f"GNN生成的h_change形状: {h_change.shape}, 类型: {h_change.dtype}")

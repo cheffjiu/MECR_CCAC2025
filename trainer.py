@@ -365,15 +365,21 @@ class Trainer:
                 attention_mask_for_gen = encoded_prompts_for_gen["attention_mask"]
 
                 unwrapped_model = self.accelerator.unwrap_model(self.model)
-                h_change, _ = unwrapped_model.multimodal_emotion_gnn(batched_graph)
+                # h_change, _ = unwrapped_model.multimodal_emotion_gnn(batched_graph)
 
                 generated_ids = unwrapped_model.generate(
                     input_ids=input_ids_for_gen,
                     attention_mask=attention_mask_for_gen,
-                    h_change=h_change,
-                    pad_token_id=self.tokenizer.pad_token_id,
+                    batched_graph=batched_graph,
+                    # h_change=h_change,
+                    pad_token_id=self.tokenizer.pad_token_id, 
                     max_new_tokens=self.config.cfg_train.max_new_tokens,
-                    # ... 其他生成参数
+                    num_beams=self.config.cfg_train.num_beams,
+                    do_sample=self.config.cfg_train.do_sample,
+                    temperature=self.config.cfg_train.temperature,
+                    top_p=self.config.cfg_train.top_p,
+                    top_k=self.config.cfg_train.top_k,
+                    repetition_penalty=self.config.cfg_train.repetition_penalty,
                 )
                 
                 prompt_length = input_ids_for_gen.shape[1]
@@ -443,7 +449,7 @@ class Trainer:
 
                     outputs = self.model(
                         input_ids=full_input_ids, attention_mask=full_attention_mask,
-                        batched_graph=batched_graph, h_change=h_change, labels=labels
+                        batched_graph=batched_graph, labels=labels
                     )
                     all_loss.append(outputs.loss.item())
 
