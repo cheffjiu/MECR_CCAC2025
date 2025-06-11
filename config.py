@@ -8,28 +8,27 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(current_file_path)))
 
 @dataclass
 class config_model:
-    #===融合模块参数配置====#
+    # ===融合模块参数配置====#
     fusion_d_t: int = 768  # 文本特征维度
     fusion_d_v: int = 512  # 视频特征维度
     fusion_d_fusion: int = 256  # 融合特征维度
     fusion_num_heads: int = 4  # 多头注意力头数
     fusion_num_layers: int = 2  # 交叉注意力层数
     fusion_dropout: float = 0.1  # 丢弃率
-    #===GNN参数配置====#
-    gnn_in_dim: int = 256 # GNN输入维度
+    # ===GNN参数配置====#
+    gnn_in_dim: int = 256  # GNN输入维度
     gnn_hidden_dim: int = 256  # GNN隐藏层维度
     gnn_out_dim: int = 256  # GNN输出维度
     gnn_num_heads: int = 4  # GNN多头注意力头数
     gnn_dropout: float = 0.1  # 丢弃率
-    #===LLM注入模块参数配置====#
+    # ===LLM注入模块参数配置====#
     injection_in_dim: int = 1024  # GNN输出维度
     injection_out_dim: int = 1024  # LLM模型输出维度
-    injection_num_heads: int = 4  # 多头注意力头数
-    injection_dropout: float = 0.1  # 丢弃率
-    #===LLM参数配置====#
+    injection_num_gnn_tokens: int = 4  # 生成的伪词元数量
+    # ===LLM参数配置====#
     llm_name: str = "Qwen/Qwen3-0.6B"  # 模型名称或路径
-    llm_tokenizer_name:str="Qwen/Qwen3-0.6B"
-    
+    llm_tokenizer_name: str = "Qwen/Qwen3-0.6B"
+
 
 @dataclass
 class config_dataset_dataloader:
@@ -50,30 +49,30 @@ class config_dataset_dataloader:
     )
     feature_root_val: str = os.path.join(project_root, "data/feature/val")
     # ===配置dataloader参数===#
-    batch_size: int = 1# 批大小
-    num_workers: int = 8 # 工作进程数
+    batch_size: int = 1  # 批大小
+    num_workers: int = 8  # 工作进程数
 
 
 @dataclass
 class config_train:
     # ===配置训练参数===#
-    num_train_epochs: int = 100 # 训练轮数
+    num_train_epochs: int = 100  # 训练轮数
     learning_rate: float = 3e-5  # 学习率
     weight_decay: float = 0.01  # 权重衰减
-    warmup_ratio: float = 0.1 # 预热率
+    warmup_ratio: float = 0.1  # 预热率
     accumulation_steps: int = 2  # 梯度累积步数
     max_grad_norm: float = 1.0  # 梯度裁剪阈#
     # === 生成参数 ===
     # 针对情感回应生成，我们通常希望回应既有创造性又不过于离谱，避免重复
-    max_new_tokens: int = 120 # 根据情感回应的典型长度调整，例如 80-120 词
-    num_beams: int = 1        # 采样模式下通常设为1，不使用束搜索
-    do_sample: bool = True    # 启用采样，增加回应多样性
+    max_new_tokens: int = 120  # 根据情感回应的典型长度调整，例如 80-120 词
+    num_beams: int = 1  # 采样模式下通常设为1，不使用束搜索
+    do_sample: bool = True  # 启用采样，增加回应多样性
     temperature: float = 0.8  # 略低于1，确保一定随机性但不过于发散
-    top_p: float = 0.9        # 常用且效果好的 Top-P 值，在保证质量的同时增加多样性
-    top_k: int = 0            # 与 top_p 配合使用时，通常设为0
-    repetition_penalty: float = 1.2 # 适度惩罚重复，防止回应过于机械或陷入循环
+    top_p: float = 0.9  # 常用且效果好的 Top-P 值，在保证质量的同时增加多样性
+    top_k: int = 0  # 与 top_p 配合使用时，通常设为0
+    repetition_penalty: float = 1.2  # 适度惩罚重复，防止回应过于机械或陷入循环
     # ===早停参数===#
-    start_eval_epoch:int =3 #开始验证epoch
+    start_eval_epoch: int = 3  # 开始验证epoch
     patience: int = 2  # 早停轮数
     min_delta: float = 0.001  # 早停最小变化
     # ===配置模型保存===#

@@ -12,24 +12,22 @@ from Inject_to_llm import InjectionModule
 class QwenWithInjection(PreTrainedModel, GenerationMixin):
     def __init__(self, qwen_model, cfg_model):
         """
-        包装 Qwen 模型，实现 GNN 特征注入。
-
-        Args:
-            qwen_model: 原始 Qwen 模型
-            injection_module: 注入模块（接收 LLM 隐状态 + h_change）
+        [重构后] 包装 Qwen 模型，实现 GNN 特征的“前注入”。
         """
         super().__init__(qwen_model.config)
         self.config = qwen_model.config
         self.cfg = cfg_model
+
+        # 1. GNN 模块，保持不变
         self.multimodal_emotion_gnn = MultimodalEmotionGNN(
-            #=====融合模块参数初始化=====#
+            # 融合参数初始化
             t_feat_dim=self.cfg.fusion_d_t,
             v_feat_dim=self.cfg.fusion_d_v,
             d_fusion=self.cfg.fusion_d_fusion,
             fusion_heads=self.cfg.fusion_num_heads,
             fusion_layers=self.cfg.fusion_num_layers,
             fusion_dropout=self.cfg.fusion_dropout,
-            #=====GNN参数初始化=====#
+            # GNN 模块参数初始化
             gnn_in_dim=self.cfg.gnn_in_dim,
             gnn_hidden_dim=self.cfg.gnn_hidden_dim,
             gnn_out_dim=self.cfg.gnn_out_dim,
@@ -37,19 +35,22 @@ class QwenWithInjection(PreTrainedModel, GenerationMixin):
             gnn_dropout=self.cfg.gnn_dropout,
         )
 
+        # 2. LLM 主干和头部，保持不变
         self.backbone = qwen_model.model
         self.lm_head = qwen_model.lm_head
+
+        # 3. 使用修改后的 InjectionModule 作为 GNN 投影器
         self.injection_module = InjectionModule(
-            d_gnn=self.cfg.injection_in_dim,
-            d_model=self.cfg.injection_out_dim,
-            n_heads=self.cfg.injection_num_heads,
-            dropout=self.cfg.injection_dropout,
+            d_gnn=self.cfg.injection_in_dim,  # GNN 输出维度
+            d_model=self.config.hidden_size,  # LLM 的隐藏/词嵌入维度
+            num_gnn_tokens=self.cfg.injection_num_gnn_tokens,  # GNN 伪词元数量 k
         )
+        # 将 k 保存为实例属性，方便 forward 中使用
+        self.num_gnn_tokens = self.cfg.injection_num_gnn_tokens
 
-
+        # 4. 其他初始化，保持不变
         self.generation_config = qwen_model.generation_config
         self.main_input_name = "input_ids"
-
         self._freeze_backbone()
 
     def _freeze_backbone(self):
@@ -58,70 +59,97 @@ class QwenWithInjection(PreTrainedModel, GenerationMixin):
             param.requires_grad = False
         print("Qwen 主干参数已冻结")
 
+    def get_input_embeddings(self) -> nn.Module:
+        return self.backbone.get_input_embeddings()
+
+    def set_input_embeddings(self, new_embeddings: nn.Module):
+        self.backbone.set_input_embeddings(new_embeddings)
+
     def forward(
         self,
-        input_ids: torch.LongTensor,
+        input_ids: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
         batched_graph: Optional[Any] = None,
-        h_change: Optional[torch.Tensor] = None, #模型的generate()使用
         labels: Optional[torch.LongTensor] = None,
         past_key_values: Optional[Tuple[Tuple[torch.Tensor]]] = None,
+        inputs_embeds: Optional[torch.FloatTensor] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         **kwargs,
     ) -> Union[Dict[str, torch.Tensor], Tuple[torch.Tensor]]:
-        """
-        前向传播，训练 & 推理通用
-        """
+
         return_dict = (
             return_dict if return_dict is not None else self.config.use_return_dict
         )
-        output_hidden_states = (
-            output_hidden_states
-            if output_hidden_states is not None
-            else self.config.output_hidden_states
-        )
-        #获取h_change
-        if h_change is None and batched_graph is not None:
-            h_change, _ = self.multimodal_emotion_gnn(batched_graph)
-            # print(f"GNN生成的h_change形状: {h_change.shape}, 类型: {h_change.dtype}")
 
+        # 判断是否是推理的第一步 (没有KV缓存) 或 训练 (没有KV缓存)
+        is_first_step_or_training = past_key_values is None
 
-        # 主干模型输出
+        if is_first_step_or_training:
+            # 如果是第一步或训练，需要执行完整的“前注入”流程
+            if inputs_embeds is not None:
+                # 正常不应发生，如果外部传入了 embeds，优先使用
+                pass
+            elif input_ids is not None:
+                # 1. 获取 GNN 特征 h_change
+                if batched_graph is None:
+                    raise ValueError(
+                        "`batched_graph` must be provided for the first step or training."
+                    )
+                h_change, _ = self.multimodal_emotion_gnn(batched_graph)
+
+                # 2. 投影 h_change 为伪词元嵌入
+                gnn_embeds = self.injection_module(h_change)
+
+                # 3. 获取文本词嵌入
+                text_embeds = self.get_input_embeddings()(input_ids)
+
+                # 4. 拼接嵌入向量
+                inputs_embeds = torch.cat([gnn_embeds, text_embeds], dim=1)
+
+                # 5. 更新 attention_mask 以包含 GNN 伪词元
+                if attention_mask is not None:
+                    gnn_attention_mask = torch.ones(
+                        gnn_embeds.size()[:-1],
+                        dtype=torch.long,
+                        device=inputs_embeds.device,
+                    )
+                    attention_mask = torch.cat(
+                        [gnn_attention_mask, attention_mask], dim=1
+                    )
+            else:
+                raise ValueError(
+                    "You have to specify either `input_ids` or `inputs_embeds`."
+                )
+
+        # 将最终的嵌入向量或原始输入送入 LLM backbone
+        # 在推理的后续步骤中，inputs_embeds 为 None，backbone 将使用 input_ids (单个新 token) 和 past_key_values
         backbone_outputs = self.backbone(
-            input_ids=input_ids,
+            input_ids=(
+                None if is_first_step_or_training else input_ids
+            ),  # 在第一步或训练时，input_ids 已被处理
+            inputs_embeds=inputs_embeds if is_first_step_or_training else None,
             attention_mask=attention_mask,
             past_key_values=past_key_values,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
-            **kwargs,
         )
 
-        last_hidden_state = (
-            backbone_outputs.last_hidden_state if return_dict else backbone_outputs[0]
-        )
+        # 计算 logits
+        hidden_states = backbone_outputs.last_hidden_state
+        logits = self.lm_head(hidden_states)
 
-        # print(f"基础模型输出形状: {last_hidden_state.shape}")
-
-        # 注入 h_change 特征
-        if h_change is not None:
-            injected_hidden = self.injection_module(last_hidden_state, h_change)
-        else:
-            injected_hidden = last_hidden_state
-        # print(f"注入后形状: {injected_hidden.shape}")
-
-        logits = self.lm_head(injected_hidden)
-        # print(f"语言模型logits输出形状: {logits.shape}")
-
+        # 计算损失
         loss = None
         if labels is not None:
-            loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
-            loss = loss_fct(
-                logits.view(-1, logits.size(-1)),
-                labels.view(-1),
-            )
+            # 裁剪 logits 来匹配原始 labels 的长度
+            # 丢弃 GNN 伪词元对应的 logits
+            text_logits = logits[:, self.num_gnn_tokens :, :].contiguous()
+
+            loss_fct = nn.CrossEntropyLoss()
+            loss = loss_fct(text_logits.view(-1, text_logits.size(-1)), labels.view(-1))
 
         if not return_dict:
             output = (logits,) + backbone_outputs[1:]
@@ -129,51 +157,43 @@ class QwenWithInjection(PreTrainedModel, GenerationMixin):
 
         return CausalLMOutputWithPast(
             loss=loss,
-            logits=logits,
+            logits=logits,  # generate 需要完整的 logits
             past_key_values=backbone_outputs.past_key_values,
             hidden_states=backbone_outputs.hidden_states,
             attentions=backbone_outputs.attentions,
         )
-    
 
     # =========== 生成相关 ===========
     def prepare_inputs_for_generation(
         self,
         input_ids: torch.LongTensor,
         past_key_values: Optional[Tuple[Tuple[torch.Tensor]]] = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        batched_graph: Optional[Any] = None,
-        h_change: Optional[torch.Tensor] = None,  # <<< 加入这个
         **kwargs,
     ) -> Dict[str, Any]:
         """
-        为生成步骤准备输入，确保 h_change 在每一步都传入 forward。
+        为生成步骤准备输入。这是适配 .generate() 的关键。
         """
+        # 这是 Hugging Face 的标准模板
 
-        # 如果 KV 缓存已存在，我们只需要将最后一个 token 作为输入。
-        if past_key_values is not None:
+        # 当使用 KV 缓存时，我们只需要最后一个 token 作为新的 input_ids
+        if past_key_values:
             input_ids = input_ids[:, -1:]
 
-        # 如果当前 step 没传 h_change，手动从 batched_graph 生成（通常只会在第一步）
-        if h_change is None and batched_graph is not None:
-            h_change, _ = self.multimodal_emotion_gnn(batched_graph)
-
-        return {
-            "input_ids": input_ids,
-            "attention_mask": attention_mask,
-            "past_key_values": past_key_values,
-            "batched_graph": batched_graph,  # optional，可用于 debug
-            "h_change": h_change,  # <<< 持续传递
-            **kwargs,
-        }
-    
-
+        # 将 `batched_graph` 和其他重要的 kwargs 打包，
+        # 以便 .generate() 能将它们全部传递给 forward 方法。
+        # `attention_mask` 和 `use_cache` 也会在 kwargs 中。
+        kwargs["past_key_values"] = past_key_values
+        return {"input_ids": input_ids, **kwargs}
 
     def _reorder_cache(
         self,
         past_key_values: Tuple[Tuple[torch.Tensor]],
         beam_idx: torch.LongTensor,
     ) -> Tuple[Tuple[torch.Tensor]]:
+        """
+        为 beam search 正确地重新排序 KV 缓存。
+        这个实现是标准的，无需改动。
+        """
         return tuple(
             tuple(layer_past.index_select(0, beam_idx) for layer_past in layer)
             for layer in past_key_values
@@ -182,12 +202,7 @@ class QwenWithInjection(PreTrainedModel, GenerationMixin):
     def can_generate(self) -> bool:
         return True
 
-    # ========== 模型LoRA / PEFT 相关 ===========
-    def get_input_embeddings(self) -> nn.Module:
-        return self.backbone.get_input_embeddings()
-
-    def set_input_embeddings(self, new_embeddings: nn.Module):
-        self.backbone.set_input_embeddings(new_embeddings)
+    # ========== LoRA / PEFT 相关方法保持不变 ==========
 
     def tie_weights(self):
         self.backbone.tie_weights()
