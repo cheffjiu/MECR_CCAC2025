@@ -16,8 +16,8 @@ def main():
     pipeline = DataCleaningPipeline()
 
     # 处理训练数据（添加项目根目录前缀）
-    # file_path = "data/MECR_CCAC2025/train.json"#训练集json文件路径
-    file_path = "data/MECR_CCAC2025/val.json"#验证集json文件路径
+    file_path = "data/MECR_CCAC2025/train.json"#训练集json文件路径
+    # file_path = "data/MECR_CCAC2025/val.json"#验证集json文件路径
     # file_path = "data/MECR_CCAC2025/demo.json" #样本json文件路径
     sub_name=file_path[19:]
     logging.info("正在处理文件：{}".format(sub_name))
