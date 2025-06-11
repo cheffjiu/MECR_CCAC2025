@@ -144,12 +144,33 @@ class QwenWithInjection(PreTrainedModel, GenerationMixin):
         # 计算损失
         loss = None
         if labels is not None:
-            # 裁剪 logits 来匹配原始 labels 的长度
-            # 丢弃 GNN 伪词元对应的 logits
-            text_logits = logits[:, self.num_gnn_tokens :, :].contiguous()
+            # logits: [B, k + T_text, VocabSize]
+            # labels: [B, T_text]
 
+            # --- 步骤 1: 创建用于填充的 -100 张量 ---
+            # 获取批大小 B
+            batch_size = labels.shape[0]
+
+            # 创建一个形状为 [B, k] 的张量，所有值都是 -100
+            # k 就是 self.num_gnn_tokens
+            padding_for_labels = torch.full(
+                (batch_size, self.num_gnn_tokens),
+                -100,
+                dtype=torch.long,
+                device=labels.device,
+            )
+
+            # --- 步骤 2: 将填充拼接到原始 labels 的左边 ---
+            # [B, k] + [B, T_text] -> [B, k + T_text]
+            aligned_labels = torch.cat([padding_for_labels, labels], dim=1)
+
+            # --- 步骤 3: 计算损失 ---
+            # 现在，logits 和 aligned_labels 的序列长度完全相同了！
             loss_fct = nn.CrossEntropyLoss()
-            loss = loss_fct(text_logits.view(-1, text_logits.size(-1)), labels.view(-1))
+            loss = loss_fct(
+                logits.view(-1, self.config.vocab_size),  # 将 logits 展平
+                aligned_labels.view(-1),  # 将 labels 展平
+            )
 
         if not return_dict:
             output = (logits,) + backbone_outputs[1:]
