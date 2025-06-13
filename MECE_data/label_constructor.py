@@ -24,13 +24,13 @@ class DefaultLabelConstructor(LabelConstructor):
         visual_stimulus_str = visual_stimulus if visual_stimulus is not None else "无"
 
         label_parts = []
-        label_parts.append(f"[STIMULUS_TEXT]: {textual_stimulus}")
-        label_parts.append(f"[STIMULUS_VISUAL]: {visual_stimulus_str}")
-        label_parts.append(f"[APPRAISAL]: {appraisal}")
-        label_parts.append(f"[RESPONSE]: {response}")
+        label_parts.append(f"{textual_stimulus}；")
+        label_parts.append(f"{visual_stimulus_str}。")
+        label_parts.append(f"{appraisal}。")
+        label_parts.append(f"{response}。")
 
         # 使用 '\n' 将所有部分连接起来，形成多行字符串
-        return "\n".join(label_parts)
+        return " ".join(label_parts)
 
 
 
