@@ -167,7 +167,7 @@ class RationaleEvaluator:
         """
         # 1. 将预测和参考都转换为评估所需的最终单行纯文本格式
         # predictions 是 LLM 的带标签输出字符串，需要先解析再格式化
-        pred_texts = [self.prepare_for_evaluation(p_str) for p_str in predictions]
+        pred_texts = predictions
 
         # references 是原始 JSON 字典，也需要通过 prepare_for_evaluation 格式化
         ref_texts = [self.prepare_for_evaluation(r_dict) for r_dict in references]

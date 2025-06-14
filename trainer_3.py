@@ -1,16 +1,4 @@
-import os
-import sys
 
-os.environ["TOKENIZERS_PARALLELISM"] = (
-    "false"  # 关闭tokenizer的并行化，避免与dataloader的多线程冲突，导致死锁
-)
-
-
-current_file_path = os.path.abspath(__file__)
-project_root = os.path.abspath(os.path.join(os.path.dirname(current_file_path)))
-sys.path.extend(
-    os.path.join(project_root, sub) for sub in ["", "model", "MECE_data", "utils"]
-)
 import os
 import sys
 import torch
@@ -23,24 +11,17 @@ from transformers import (
 from tqdm import tqdm
 from dataclasses import dataclass
 from accelerate import Accelerator
-
-
-# Import PEFT modules
 from peft import LoraConfig, get_peft_model, TaskType
-
-# 导入自定义模块
 from model.Qwen_with_Injection import QwenWithInjection
 from MECE_data.mecr_dataset import MECRDataset
 from MECE_data.collate_to_graph_batch import CustomCollate
 from MECE_data.build_emotion_graph import build_emotion_graph
-
 from utils.rationale_evaluate import RationaleEvaluator
 
-
-class Trainer:
+class TrainerStage3: 
     def __init__(self, cfg: dataclass):
         """
-        训练器初始化。
+        [阶段二] 训练器初始化：加载预训练的GNN，进行LoRA和GNN的联合微调。
         """
         # 1. 初始化 Accelerator
         self.accelerator = Accelerator()
@@ -58,7 +39,8 @@ class Trainer:
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
-        # 3. 初始化模型
+
+        # 3. 初始化模型 (保持不变)
         qwen_base_model = AutoModelForCausalLM.from_pretrained(
             self.config.cfg_model.llm_name,
             torch_dtype=torch.float32,
@@ -70,7 +52,22 @@ class Trainer:
             self.config.cfg_model,
         )
 
-        # --- LoRA Configuration for lm_head ---
+        # 【阶段二关键修改】: 加载第一阶段训练好的权重
+        unwrapped_model_for_loading = self.model # 在应用PEFT之前加载
+        stage1_gnn_path = os.path.join(self.config.cfg_train.model_save_path, "stage1_gnn.pt")
+        stage1_injection_path = os.path.join(self.config.cfg_train.model_save_path, "stage1_injection.pt")
+        
+        print("\n--- [STAGE 2] Loading pre-trained weights from Stage 1 ---")
+        try:
+            unwrapped_model_for_loading.multimodal_emotion_gnn.load_state_dict(torch.load(stage1_gnn_path, map_location='cpu'))
+            unwrapped_model_for_loading.injection_module.load_state_dict(torch.load(stage1_injection_path, map_location='cpu'))
+            print("Successfully loaded weights for GNN and InjectionModule.")
+        except FileNotFoundError:
+            print(f"警告：未找到阶段一的权重文件。将从随机初始化开始阶段二训练。请确保路径正确：")
+            print(f" - GNN path: {stage1_gnn_path}")
+            print(f" - Injection path: {stage1_injection_path}")
+            
+        # --- LoRA 配置和应用 (逻辑保持不变) ---
         lora_config = LoraConfig(
             r=self.config.cfg_lora.lora_r,
             lora_alpha=self.config.cfg_lora.lora_alpha,
@@ -79,20 +76,17 @@ class Trainer:
             bias="none",
             task_type=TaskType.CAUSAL_LM,
         )
-
-        # Apply LoRA to the model
+        
         self.model = get_peft_model(self.model, lora_config)
-        print("\n--- 手动启用 GNN 和 InjectionModule 参数的 requires_grad ---")
+        
+        # --- 设置梯度 (逻辑保持不变) ---
+        print("\n--- [STAGE 2] Enabling gradients for GNN, Injection, and LoRA ---")
         for name, param in self.model.named_parameters():
-            # 检查参数名称是否属于 GNN 或 InjectionModule
             if "multimodal_emotion_gnn" in name or "injection_module" in name:
                 param.requires_grad = True
-                # print(f"已启用可训练: {name}, 形状: {param.shape}")
-        print("--- 启用完成 ---\n")
         self.model.print_trainable_parameters()
-        # --- End LoRA Configuration ---
-
-        # 4. 数据集和数据加载器
+        
+        # 4. 数据集和数据加载器 (保持不变)
         self.train_dataset = MECRDataset(
             json_path=self.config.cfg_dataset_dataloader.json_path_train,
             feature_root=self.config.cfg_dataset_dataloader.feature_root_train,
@@ -125,44 +119,41 @@ class Trainer:
             pin_memory=True,
         )
 
-        # 5. 优化器和学习率调度器数
+        # 5. 【阶段二关键修改】: 创建分层学习率的优化器
+        print("\n--- [STAGE 2] Creating Optimizer with Differential Learning Rates ---")
+        lora_params = []
+        gnn_injection_params = []
 
-        no_decay = ["bias", "LayerNorm.weight"]
-        # --- 在这里添加打印所有 requires_grad=True 参数的代码 ---
-        print("\n--- 检查模型中的所有可训练参数 (requires_grad=True) ---")
-        trainable_params_count = 0
         for name, param in self.model.named_parameters():
-            if param.requires_grad:
-                # print(f"可训练参数: {name}, 形状: {param.shape}")
-                trainable_params_count += 1
-        print(f"总计发现 {trainable_params_count} 个可训练参数。")
-        print("---------------------------------------------------\n")
-        # --- 打印结束 ---
-        # 只需收集 self.model (QwenWithInjection，它现在包含了所有子模块) 的参数
+            if not param.requires_grad:
+                continue
+            
+            if "lora_" in name:
+                lora_params.append(param)
+            elif "multimodal_emotion_gnn" in name or "injection_module" in name:
+                gnn_injection_params.append(param)
+        
+        # 从配置文件读取阶段二的学习率
+        lr_lora = self.config.cfg_train.stage2_lr_lora # e.g., 1e-6
+        lr_gnn = self.config.cfg_train.stage2_lr_gnn   # e.g., 2e-6
+        
         optimizer_grouped_parameters = [
-            {
-                "params": [
-                    p
-                    for n, p in self.model.named_parameters()
-                    if not any(nd in n for nd in no_decay) and p.requires_grad
-                ],
-                "weight_decay": self.config.cfg_train.weight_decay,
-            },
-            {
-                "params": [
-                    p
-                    for n, p in self.model.named_parameters()  # <--- 只需要遍历 self.model
-                    if any(nd in n for nd in no_decay) and p.requires_grad
-                ],
-                "weight_decay": 0.0,
-            },
+            {"params": lora_params, "lr": lr_lora, "weight_decay": self.config.cfg_train.weight_decay},
+            {"params": gnn_injection_params, "lr": lr_gnn, "weight_decay": self.config.cfg_train.weight_decay},
         ]
-        self.optimizer = torch.optim.AdamW(
-            optimizer_grouped_parameters, lr=self.config.cfg_train.learning_rate
-        )
+        
+        self.optimizer = torch.optim.AdamW(optimizer_grouped_parameters)
 
-        num_training_steps = (len(self.train_dataloader) // self.config.cfg_train.accumulation_steps * self.config.cfg_train.num_train_epochs)
+        print(f"Optimizer configured for Stage 2:")
+        print(f" - LoRA Group: {len(lora_params)} tensors, LR = {lr_lora}")
+        print(f" - GNN/Injection Group: {len(gnn_injection_params)} tensors, LR = {lr_gnn}")
+
+
+        # 【阶段二关键修改】: 创建匹配阶段二的调度器
+        num_epochs = self.config.cfg_train.stage2_epochs # 从配置中读取阶段二的轮数
+        num_training_steps = (len(self.train_dataloader) // self.config.cfg_train.accumulation_steps * num_epochs)
         num_warmup_steps = int(num_training_steps * self.config.cfg_train.warmup_ratio)
+        
         self.lr_scheduler = get_cosine_schedule_with_warmup(
             self.optimizer,
             num_warmup_steps=num_warmup_steps,
@@ -170,7 +161,7 @@ class Trainer:
             num_cycles=0.5,
         )
 
-        # 6. 使用 accelerator.prepare() 包装所有组件
+        # 6. 使用 accelerator.prepare() (保持不变)
         (
             self.model,
             self.optimizer,
@@ -185,9 +176,9 @@ class Trainer:
             self.lr_scheduler,
         )
 
-        # 7. 评估器
+        # 7. 评估器和早停机制 (保持不变)
         self.evaluator = RationaleEvaluator(model_name=self.config.cfg_model.llm_name)
-
+        self.best_eval_score = float("-inf")
         # 8. 早停机制
         self.best_eval_score = float("-inf")
         self.epochs_no_improve = 0
@@ -481,7 +472,7 @@ class Trainer:
                         if mask_len < labels.shape[1]:
                             labels[i, :mask_len] = -100
 
-                     # ====================================================================
+                    # ====================================================================
                     # ==============  EVALUATION BATCH 0 DEBUGGING START ==============
                     # ====================================================================
                     if batch_idx == 0 and self.accelerator.is_main_process:
@@ -573,33 +564,23 @@ class Trainer:
                 metrics["eval_loss"] = round(avg_eval_loss, 4)
 
         return metrics if self.accelerator.is_main_process else {}
-
     def train(self):
-        
-        # 开始训练循环
-        for epoch in range(self.config.cfg_train.num_train_epochs):
-            # 打印当前 Epoch 信息
+        # 【阶段二关键修改】: 训练循环现在是针对联合微调的
+        for epoch in range(self.config.cfg_train.stage2_epochs): # 使用阶段二的轮数
             if self.accelerator.is_main_process:
-                print(f"\nEpoch {epoch + 1}/{self.config.cfg_train.num_train_epochs}")
+                print(f"\n--- STAGE 2: Epoch {epoch + 1}/{self.config.cfg_train.stage2_epochs} ---")
 
-            # --- 1. 训练一个 Epoch ---
+            # 训练 (不变)
             train_loss = self._train_epoch()
             if self.accelerator.is_main_process:
                 print(f"训练损失: {train_loss:.4f}")
 
-            # --- 2. 验证和早停判断 ---
-            current_epoch_num = epoch + 1
-            
-            # 根据配置决定是否进行验证
-            if current_epoch_num >= self.config.cfg_train.start_eval_epoch:
-                
-                # --- 2.1. 执行评估 ---
-                # 等待所有进程完成训练步骤
-                self.accelerator.wait_for_everyone()
-                eval_metrics = self._evaluate()
+            # 验证 (不变)
+            self.accelerator.wait_for_everyone()
+            eval_metrics = self._evaluate()
 
-                # --- 2.2. 主进程处理结果、保存模型和早停判断 ---
-                if self.accelerator.is_main_process:
+            # 保存模型和早停判断 (不变，因为它是基于 'score_sum' 的，这正是阶段二的目标)
+            if self.accelerator.is_main_process:
                     print(f"验证指标: {eval_metrics}")
 
                     # 获取当前epoch的评估分数

@@ -1,4 +1,5 @@
 import json
+import torch
 from torch.utils.data import Dataset
 from typing import Dict, Any
 from feature_loader import PtFeatureLoader, FeatureLoader

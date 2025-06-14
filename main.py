@@ -1,5 +1,6 @@
 from config import *
-from trainer import Trainer
+from trainer_1 import TrainerStage1
+from trainer_2  import TrainerStage2
 
 if __name__ == "__main__":
     cfg_model=config_model()
@@ -12,5 +13,6 @@ if __name__ == "__main__":
         cfg_train,
         cfg_lora,
     )
-    trainer = Trainer(cfg)
+    # trainer = TrainerStage1(cfg)
+    trainer=TrainerStage1(cfg)
     trainer.train()

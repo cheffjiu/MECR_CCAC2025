@@ -64,157 +64,130 @@ class QwenWithInjection(PreTrainedModel, GenerationMixin):
 
     def set_input_embeddings(self, new_embeddings: nn.Module):
         self.backbone.set_input_embeddings(new_embeddings)
-
     def forward(
         self,
         input_ids: Optional[torch.LongTensor] = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        batched_graph: Optional[Any] = None,
-        labels: Optional[torch.LongTensor] = None,
         past_key_values: Optional[Tuple[Tuple[torch.Tensor]]] = None,
+        attention_mask: Optional[torch.Tensor] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
+        labels: Optional[torch.LongTensor] = None, # 这个labels是只屏蔽了文本prompt的
+        batched_graph: Optional[Any] = None,
+        use_cache: Optional[bool] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         **kwargs,
-    ) -> Union[Dict[str, torch.Tensor], Tuple[torch.Tensor]]:
+    ) -> CausalLMOutputWithPast:
+        
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        use_cache = use_cache if use_cache is not None else self.config.use_cache
 
-        return_dict = (
-            return_dict if return_dict is not None else self.config.use_return_dict
-        )
+        if inputs_embeds is None:
+            inputs_embeds = self.get_input_embeddings()(input_ids)
+        
+        # 只有在第一步（无KV缓存）时才注入GNN
+        if past_key_values is None and batched_graph is not None:
+            h_change, _ = self.multimodal_emotion_gnn(batched_graph)
+            gnn_embeds_orig = self.injection_module(h_change)
+            
+            # 【终极的、处理Beam Search的核心修复】
+            # 获取文本嵌入和GNN嵌入的批次大小
+            bs_text_embeds = inputs_embeds.shape[0]
+            bs_gnn_embeds = gnn_embeds_orig.shape[0]
 
-        # 判断是否是推理的第一步 (没有KV缓存) 或 训练 (没有KV缓存)
-        is_first_step_or_training = past_key_values is None
-
-        if is_first_step_or_training:
-            # 如果是第一步或训练，需要执行完整的“前注入”流程
-            if inputs_embeds is not None:
-                # 正常不应发生，如果外部传入了 embeds，优先使用
-                pass
-            elif input_ids is not None:
-                # 1. 获取 GNN 特征 h_change
-                if batched_graph is None:
-                    raise ValueError(
-                        "`batched_graph` must be provided for the first step or training."
-                    )
-                h_change, _ = self.multimodal_emotion_gnn(batched_graph)
-
-                # 2. 投影 h_change 为伪词元嵌入
-                gnn_embeds = self.injection_module(h_change)
-
-                # 3. 获取文本词嵌入
-                text_embeds = self.get_input_embeddings()(input_ids)
-
-                # 4. 拼接嵌入向量
-                inputs_embeds = torch.cat([gnn_embeds, text_embeds], dim=1)
-
-                # 5. 更新 attention_mask 以包含 GNN 伪词元
-                if attention_mask is not None:
-                    gnn_attention_mask = torch.ones(
-                        gnn_embeds.size()[:-1],
-                        dtype=torch.long,
-                        device=inputs_embeds.device,
-                    )
-                    attention_mask = torch.cat(
-                        [gnn_attention_mask, attention_mask], dim=1
-                    )
+            if bs_text_embeds != bs_gnn_embeds:
+                # 如果不匹配，说明 .generate() 进行了扩展 (bs_text_embeds = bs_gnn_embeds * num_beams)
+                num_beams = bs_text_embeds // bs_gnn_embeds
+                # 我们需要手动将GNN嵌入扩展到相同的批次大小
+                gnn_embeds = gnn_embeds_orig.unsqueeze(1).expand(
+                    -1, num_beams, -1, -1
+                ).reshape(bs_text_embeds, self.num_gnn_tokens, -1)
             else:
-                raise ValueError(
-                    "You have to specify either `input_ids` or `inputs_embeds`."
+                # 如果批次大小相同（训练或num_beams=1），直接使用
+                gnn_embeds = gnn_embeds_orig
+            
+            # 现在，gnn_embeds 和 inputs_embeds 的批次大小保证是一致的
+            inputs_embeds = torch.cat([gnn_embeds, inputs_embeds], dim=1)
+           
+            
+            if attention_mask is not None:
+                gnn_attention_mask = torch.ones(
+                    gnn_embeds.shape[:2], dtype=attention_mask.dtype, device=attention_mask.device
                 )
-
-        # 将最终的嵌入向量或原始输入送入 LLM backbone
-        # 在推理的后续步骤中，inputs_embeds 为 None，backbone 将使用 input_ids (单个新 token) 和 past_key_values
-        backbone_outputs = self.backbone(
-            input_ids=(
-                None if is_first_step_or_training else input_ids
-            ),  # 在第一步或训练时，input_ids 已被处理
-            inputs_embeds=inputs_embeds if is_first_step_or_training else None,
+                attention_mask = torch.cat([gnn_attention_mask, attention_mask], dim=1)
+        
+        outputs = self.backbone(
+            inputs_embeds=inputs_embeds,
             attention_mask=attention_mask,
             past_key_values=past_key_values,
+            use_cache=use_cache,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
         )
 
-        # 计算 logits
-        hidden_states = backbone_outputs.last_hidden_state
+        hidden_states = outputs.last_hidden_state
         logits = self.lm_head(hidden_states)
-
-        # 计算损失
+        
         loss = None
         if labels is not None:
-            # logits: [B, k + T_text, VocabSize]
-            # labels: [B, T_text]
-
-            # --- 步骤 1: 创建用于填充的 -100 张量 ---
-            # 获取批大小 B
-            batch_size = labels.shape[0]
-
-            # 创建一个形状为 [B, k] 的张量，所有值都是 -100
-            # k 就是 self.num_gnn_tokens
-            padding_for_labels = torch.full(
-                (batch_size, self.num_gnn_tokens),
-                -100,
-                dtype=torch.long,
-                device=labels.device,
+            #  在模型内部完成 GNN 伪词元的 label 屏蔽
+            
+            # 1. 创建一个用于屏蔽GNN伪词元的-100张量
+            batch_size = inputs_embeds.shape[0]
+            padding_for_gnn_labels = torch.full(
+                (batch_size, self.num_gnn_tokens), -100, dtype=torch.long, device=labels.device
             )
-
-            # --- 步骤 2: 将填充拼接到原始 labels 的左边 ---
-            # [B, k] + [B, T_text] -> [B, k + T_text]
-            aligned_labels = torch.cat([padding_for_labels, labels], dim=1)
-
-            # --- 步骤 3: 计算损失 ---
-            # 现在，logits 和 aligned_labels 的序列长度完全相同了！
+            
+            # 2. 将 -100 填充与 Trainer 传入的、已屏蔽了prompt的labels拼接
+            #    这样就得到了与 logits 完全对齐的、最终的 aligned_labels
+            aligned_labels = torch.cat([padding_for_gnn_labels, labels], dim=1)
+            
+            # 3. 使用对齐后的 a_labels 计算损失
             loss_fct = nn.CrossEntropyLoss()
-            loss = loss_fct(
-                logits.view(-1, self.config.vocab_size),  # 将 logits 展平
-                aligned_labels.view(-1),  # 将 labels 展平
-            )
+            
+            # 为了安全，确保对齐后的标签长度不超过logits的序列长度
+            logits_len = logits.shape[1]
+            aligned_labels = aligned_labels[:, :logits_len]
 
-        if not return_dict:
-            output = (logits,) + backbone_outputs[1:]
-            return ((loss,) + output) if loss is not None else output
+            loss = loss_fct(logits.view(-1, self.config.vocab_size), aligned_labels.view(-1))
 
         return CausalLMOutputWithPast(
             loss=loss,
-            logits=logits,  # generate 需要完整的 logits
-            past_key_values=backbone_outputs.past_key_values,
-            hidden_states=backbone_outputs.hidden_states,
-            attentions=backbone_outputs.attentions,
+            logits=logits,
+            past_key_values=outputs.past_key_values,
+            hidden_states=outputs.hidden_states,
+            attentions=outputs.attentions,
         )
 
-    # =========== 生成相关 ===========
+
     def prepare_inputs_for_generation(
         self,
         input_ids: torch.LongTensor,
         past_key_values: Optional[Tuple[Tuple[torch.Tensor]]] = None,
         **kwargs,
     ) -> Dict[str, Any]:
-        """
-        为生成步骤准备输入。这是适配 .generate() 的关键。
-        """
-        # 这是 Hugging Face 的标准模板
-
-        # 当使用 KV 缓存时，我们只需要最后一个 token 作为新的 input_ids
+        
+        # 标准的KV缓存处理
         if past_key_values:
             input_ids = input_ids[:, -1:]
 
-        # 将 `batched_graph` 和其他重要的 kwargs 打包，
-        # 以便 .generate() 能将它们全部传递给 forward 方法。
-        # `attention_mask` 和 `use_cache` 也会在 kwargs 中。
-        kwargs["past_key_values"] = past_key_values
-        return {"input_ids": input_ids, **kwargs}
+        model_inputs = {"input_ids": input_ids, "past_key_values": past_key_values}
+        
+        # 【LLaVA范式 - D】: 智能传递 batched_graph
+        # 只有在第一步（无KV缓存）时，我们才需要 batched_graph
+        if not past_key_values:
+            model_inputs['batched_graph'] = kwargs.get('batched_graph', None)
 
+        # 传递其他所有必要的kwargs，尤其是 attention_mask
+        model_inputs.update(kwargs)
+        
+        return model_inputs
     def _reorder_cache(
         self,
         past_key_values: Tuple[Tuple[torch.Tensor]],
         beam_idx: torch.LongTensor,
     ) -> Tuple[Tuple[torch.Tensor]]:
-        """
-        为 beam search 正确地重新排序 KV 缓存。
-        这个实现是标准的，无需改动。
-        """
         return tuple(
             tuple(layer_past.index_select(0, beam_idx) for layer_past in layer)
             for layer in past_key_values
@@ -222,9 +195,7 @@ class QwenWithInjection(PreTrainedModel, GenerationMixin):
 
     def can_generate(self) -> bool:
         return True
-
-    # ========== LoRA / PEFT 相关方法保持不变 ==========
-
+        
     def tie_weights(self):
         self.backbone.tie_weights()
 
@@ -236,3 +207,17 @@ class QwenWithInjection(PreTrainedModel, GenerationMixin):
 
     def set_output_embeddings(self, new_embeddings: nn.Module):
         self.lm_head = new_embeddings
+
+    def print_trainable_parameters(self):
+        """
+        Prints the number of trainable parameters in the model.
+        """
+        trainable_params = 0
+        all_param = 0
+        for _, param in self.named_parameters():
+            all_param += param.numel()
+            if param.requires_grad:
+                trainable_params += param.numel()
+        print(
+            f"trainable params: {trainable_params} || all params: {all_param} || trainable%: {100 * trainable_params / all_param:.2f}"
+        )

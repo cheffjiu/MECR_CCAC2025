@@ -26,8 +26,8 @@ class config_model:
     injection_out_dim: int = 1024  # LLM模型输出维度
     injection_num_gnn_tokens: int = 4  # 生成的伪词元数量
     # ===LLM参数配置====#
-    llm_name: str = "Qwen/Qwen3-0.6B"  # 模型名称或路径
-    llm_tokenizer_name: str = "Qwen/Qwen3-0.6B"
+    llm_name: str = "Qwen/Qwen3-8B"  # 模型名称或路径
+    llm_tokenizer_name: str = "Qwen/Qwen3-8B"
 
 
 @dataclass
@@ -49,31 +49,38 @@ class config_dataset_dataloader:
     )
     feature_root_val: str = os.path.join(project_root, "data/feature/val")
     # ===配置dataloader参数===#
-    batch_size: int = 1  # 批大小
-    num_workers: int = 8  # 工作进程数
+    batch_size: int = 1 # 批大小
+    num_workers: int = 1 # 工作进程数
 
 
 @dataclass
 class config_train:
     # ===配置训练参数===#
-    num_train_epochs: int = 100  # 训练轮数
-    learning_rate: float = 3e-5  # 学习率
-    weight_decay: float = 0.01  # 权重衰减
     warmup_ratio: float = 0.1  # 预热率
     accumulation_steps: int = 2  # 梯度累积步数
     max_grad_norm: float = 1.0  # 梯度裁剪阈#
+    #===第一阶段训练参数===#
+    stage1_epochs :int =10 #训练轮数
+    stage1_learning_rate:float =1e-6 #学习率
+    stage1_weight_decay: float = 0.1  # 权重衰减
+    #===第二阶段训练参数===#
+    stage2_epochs :int =10 #训练轮数
+    lora_learning_rate: float = 1e-6 #lora学习率
+    num_train_epochs: int = 10 # 训练轮数
+    weight_decay: float = 0.05  # 权重衰减
+
     # === 生成参数 ===
     # 针对情感回应生成，我们通常希望回应既有创造性又不过于离谱，避免重复
-    max_new_tokens: int = 120  # 根据情感回应的典型长度调整，例如 80-120 词
-    num_beams: int = 1  # 采样模式下通常设为1，不使用束搜索
-    do_sample: bool = True  # 启用采样，增加回应多样性
+    max_new_tokens: int = 128  # 根据情感回应的典型长度调整，例如 80-120 词
+    num_beams: int = 3  # 采样模式下通常设为1，不使用束搜索
+    do_sample: bool = False  # 启用采样，增加回应多样性
     temperature: float = 0.8  # 略低于1，确保一定随机性但不过于发散
     top_p: float = 0.9  # 常用且效果好的 Top-P 值，在保证质量的同时增加多样性
     top_k: int = 0  # 与 top_p 配合使用时，通常设为0
-    repetition_penalty: float = 1.2  # 适度惩罚重复，防止回应过于机械或陷入循环
+    repetition_penalty: float = 1.1  # 适度惩罚重复，防止回应过于机械或陷入循环
     # ===早停参数===#
-    start_eval_epoch: int = 3  # 开始验证epoch
-    patience: int = 2  # 早停轮数
+    start_eval_epoch: int = 1  # 开始验证epoch
+    patience: int = 3  # 早停轮数
     min_delta: float = 0.001  # 早停最小变化
     # ===配置模型保存===#
     model_save_path: str = os.path.join(
@@ -85,7 +92,7 @@ class config_train:
 class config_lora:
     lora_r: int = 8
     lora_alpha: int = 16
-    lora_dropout: float = 0.05
+    lora_dropout: float = 0.1
 
 
 @dataclass

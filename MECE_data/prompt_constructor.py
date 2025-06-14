@@ -18,7 +18,7 @@ class DefaultPromptConstructor(PromptConstructor):
     def build_prompt(
         self, sample: Dict[str, Any], similar_samples: List[Dict[str, Any]]
     ) -> str:
-        prompt = "任务角色："
+        prompt = "任务角色：你是一个情感变化原因分析专家，"
         prompt += "请根据对话历史和[情感变化]内容的提示，给出完整的情感归因，情感归因内容包含文本刺激、视觉刺激（如果没有视觉线索就填写“无”）、评估推理和情绪反应。\n"
         prompt_similar_samples = self._get_prompt_from_similar_samples(similar_samples)
         prompt += prompt_similar_samples
@@ -62,7 +62,7 @@ class DefaultPromptConstructor(PromptConstructor):
         [APPRAISAL]: {填写评估推理}
         [RESPONSE]: {填写情绪反应}"""
 
-        return f"\n[当前任务]\n请根据[情感变化]内容的提示和对话历史，按照上述格式生成完整的情感归因内容。\n对话历史：\n{dialogue_history}{emo_change}"
+        return f"\n[当前任务]\n请根据[情感变化]内容的提示和对话历史，按照上述格式生成完整的情感归因内容。\n对话历史：\n{dialogue_history}{emo_change}\n情感归因："
 
     def _build_rationale_from_sample(self, sample: Dict[str, Any]) -> str:
         rationale = sample["rationale"]
@@ -75,13 +75,13 @@ class DefaultPromptConstructor(PromptConstructor):
         visual_stimulus_str = visual_stimulus if visual_stimulus is not None else "无"
 
         label_parts = []
-        label_parts.append(f"[STIMULUS_TEXT]: {textual_stimulus}")
-        label_parts.append(f"[STIMULUS_VISUAL]: {visual_stimulus_str}")
-        label_parts.append(f"[APPRAISAL]: {appraisal}")
-        label_parts.append(f"[RESPONSE]: {response}")
+        label_parts.append(f"{textual_stimulus}；")
+        label_parts.append(f"{visual_stimulus_str}。")
+        label_parts.append(f" {appraisal}。")
+        label_parts.append(f"{response}。")
 
         # 使用 '\n' 将所有部分连接起来，形成多行字符串
-        return " ".join(label_parts)
+        return "".join(label_parts)
 
 
 # sample_prompt = DefaultPromptConstructor()
