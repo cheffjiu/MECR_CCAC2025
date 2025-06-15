@@ -8,29 +8,36 @@ class LabelConstructor(ABC):
     def build_label_from_sample(self, sample: Dict[str, Any]) -> str:
         pass
 
-
 class DefaultLabelConstructor(LabelConstructor):
+    """
+    [重构后]
+    一个专门生成结构化、多行、带标签的 Label 字符串的构造器。
+    这个输出格式与 StructuredPromptConstructor 中展示的示例输出完全匹配。
+    """
     def __init__(self):
         super().__init__()
 
     def build_label_from_sample(self, sample: Dict[str, Any]) -> str:
+        """
+        根据样本的 rationale 字典，创建一个结构化的、带标签的字符串。
+        """
         rationale = sample["rationale"]
         textual_stimulus = rationale["stimulus"]["textual"]
         visual_stimulus = rationale["stimulus"]["visual"]
         appraisal = rationale["appraisal"]
         response = rationale["response"]
 
-        # 处理视觉刺激为 None 的情况，统一表示为 "无"
-        visual_stimulus_str = visual_stimulus if visual_stimulus is not None else "无"
+        # 处理视觉刺激为 None 或空字符串的情况，统一表示为 "无"
+        visual_stimulus_str = visual_stimulus if visual_stimulus else "无"
 
-        label_parts = []
-        label_parts.append(f"{textual_stimulus}；")
-        label_parts.append(f"{visual_stimulus_str}。")
-        label_parts.append(f"{appraisal}。")
-        label_parts.append(f"{response}。")
-
-        # 使用 '\n' 将所有部分连接起来，形成多行字符串
-        return " ".join(label_parts)
+        # 返回与Prompt示例中完全一致的结构化、多行格式
+        # 这是模型在训练中需要学习的精确目标
+        return (
+            f"[STIMULUS_TEXT]: {textual_stimulus}\n"
+            f"[STIMULUS_VISUAL]: {visual_stimulus_str}\n"
+            f"[APPRAISAL]: {appraisal}\n"
+            f"[RESPONSE]: {response}"
+        )
 
 
 

@@ -10,79 +10,109 @@ class PromptConstructor(ABC):
     ) -> str:
         pass
 
-
 class DefaultPromptConstructor(PromptConstructor):
+    """
+    [重构后]
+    一个为小型语言模型优化的Prompt构造器。
+    它遵循“模式填充”原则，生成高度结构化、无歧义的Prompt。
+    """
+
     def __init__(self):
         super().__init__()
 
     def build_prompt(
         self, sample: Dict[str, Any], similar_samples: List[Dict[str, Any]]
     ) -> str:
-        prompt = "任务角色：你是一个情感变化原因分析专家，"
-        prompt += "请根据对话历史和[情感变化]内容的提示，给出完整的情感归因，情感归因内容包含文本刺激、视觉刺激（如果没有视觉线索就填写“无”）、评估推理和情绪反应。\n"
-        prompt_similar_samples = self._get_prompt_from_similar_samples(similar_samples)
-        prompt += prompt_similar_samples
-        prompt_sample = self._get_prompt_from_sample(sample)
-        prompt += prompt_sample
-        return prompt
+        """
+        构建最终的完整Prompt。
+        """
+        # 1. 一个极简的、全局性的指令
+        instruction = "### 指令:\n根据对话和情感变化，分析其原因。严格遵循输入输出格式。\n\n"
+
+        # 2. 构建Few-shot示例部分
+        few_shot_prompt = self._get_prompt_from_similar_samples(similar_samples)
+
+        # 3. 构建需要模型完成的当前任务部分
+        task_prompt = self._get_prompt_from_sample(sample)
+
+        return instruction + few_shot_prompt + task_prompt
 
     def _get_prompt_from_similar_samples(
         self, similar_samples: List[Dict[str, Any]]
     ) -> str:
-        prompt_similar_samples = ""
+        """
+        根据相似样本构建结构化的 few-shot 示例。
+        """
+        prompt_parts = []
         for i, item in enumerate(similar_samples, 1):
-            # 构建对话历史部分
-            dialogue_history = "对话历史：\n"
+            # 构建输入部分
+            dialogue_history = ""
             for line in item["dialogue"].split("\n"):
-                if line.strip():  # 跳过空行
+                if line.strip():
                     speaker, content = line.split(":", 1)
-                    dialogue_history += f"{speaker}: {content.strip()}\n"
-            # 情感变化部分
+                    dialogue_history += f"    {speaker.strip()}: {content.strip()}\n"
+            
+            emo_change = f"从{item['start_emo']}到{item['end_emo']}"
 
-            emo_change = f"[情感变化]:从{item['start_emo']}到{item['end_emo']}\n"
-            # 构建情感归因部分
-            rationale = self._build_rationale_from_sample(item)
-            # 拼接完整格式
-            prompt_similar_samples += f"示例样本{i}：\n{dialogue_history}{emo_change}\n情感归因：\n{rationale}\n"
+            # 构建输出部分 (!!! 关键改动 !!!)
+            # 这里的输出格式必须与我们期望模型生成的格式完全一致
+            structured_rationale = self._build_structured_rationale(item)
 
-        return prompt_similar_samples
+            # 将示例拼接成一个高度结构化的块
+            prompt_parts.append(
+                f"### 示例 {i}:\n"
+                f"输入:\n"
+                f"  对话:\n{dialogue_history.strip()}\n"
+                f"  变化: {emo_change}\n"
+                f"输出:\n{structured_rationale}\n"
+            )
+
+        return "\n".join(prompt_parts)
 
     def _get_prompt_from_sample(self, sample: Dict[str, Any]) -> str:
-        # 构建对话历史部分
+        """
+        构建最终需要模型推理的任务部分，其结构与示例完全一致。
+        """
+        # 构建输入部分
         dialogue_history = ""
         for utt in sample["utterances"]:
-            dialogue_history += (
-                f"{utt['speaker']} [{','.join(utt['emotion'])}]: {utt['text']}\n"
-            )
-        emo_change = f'[情感变化]:从{",".join(sample["emo_change"]["from_emotion"])}到{",".join(sample["emo_change"]["to_emotion"])}\n'  # 修改 [输出要求] 部分，明确指定纯文本格式
-        output_requirements = """[输出要求]
-        严格按照以下带有标签的格式输出，每部分独占一行，不要添加任何解释性语言或额外说明：
-        [STIMULUS_TEXT]: {填写文本刺激}
-        [STIMULUS_VISUAL]: {填写视觉线索，若无则填写“无”}
-        [APPRAISAL]: {填写评估推理}
-        [RESPONSE]: {填写情绪反应}"""
+            # 注意：原始代码情感是列表，这里用 join
+            emotion_str = ','.join(utt['emotion'])
+            dialogue_history += f"    {utt['speaker']} [{emotion_str}]: {utt['text']}\n"
+        
+        emo_change = f'从{",".join(sample["emo_change"]["from_emotion"])}到{",".join(sample["emo_change"]["to_emotion"])}'
+        
+        # 构造最终的任务块，注意末尾的"输出:\n"是引导模型开始生成的关键
+        return (
+            f"\n### 任务:\n"
+            f"输入:\n"
+            f"  对话:\n{dialogue_history.strip()}\n"
+            f"  变化: {emo_change}\n"
+            f"输出:\n"
+        )
 
-        return f"\n[当前任务]\n请根据[情感变化]内容的提示和对话历史，按照上述格式生成完整的情感归因内容。\n对话历史：\n{dialogue_history}{emo_change}\n情感归因："
-
-    def _build_rationale_from_sample(self, sample: Dict[str, Any]) -> str:
+    def _build_structured_rationale(self, sample: Dict[str, Any]) -> str:
+        """
+        [!!! 新增辅助函数 !!!]
+        根据样本的rationale字典，创建一个结构化的、带标签的字符串。
+        这是模型需要学习的输出格式。
+        """
         rationale = sample["rationale"]
         textual_stimulus = rationale["stimulus"]["textual"]
         visual_stimulus = rationale["stimulus"]["visual"]
         appraisal = rationale["appraisal"]
         response = rationale["response"]
 
-        # 处理视觉刺激为 None 的情况，统一表示为 "无"
+        # 处理视觉刺激为 None 的情况
         visual_stimulus_str = visual_stimulus if visual_stimulus is not None else "无"
 
-        label_parts = []
-        label_parts.append(f"{textual_stimulus}；")
-        label_parts.append(f"{visual_stimulus_str}。")
-        label_parts.append(f" {appraisal}。")
-        label_parts.append(f"{response}。")
-
-        # 使用 '\n' 将所有部分连接起来，形成多行字符串
-        return "".join(label_parts)
-
+        # 返回与[输出要求]完全一致的多行格式
+        return (
+            f"[STIMULUS_TEXT]: {textual_stimulus}\n"
+            f"[STIMULUS_VISUAL]: {visual_stimulus_str}\n"
+            f"[APPRAISAL]: {appraisal}\n"
+            f"[RESPONSE]: {response}"
+        )
 
 # sample_prompt = DefaultPromptConstructor()
 # # 示例数据
@@ -250,38 +280,47 @@ class DefaultPromptConstructor(PromptConstructor):
 # }
 # similary_samples = [
 #     {
+#         "sample_id": "anjia_sample1",
+#         "dialogue": "A ['Neutral']: 你先把衣服换了，然后去这个地址。\nA ['Neutral']: 一会儿会有装修公司的人过去，你去监工，看看有什么可以帮忙的。\nB ['Sad']: 这个活也派我干呀？\nB ['Sad']: 装修我不懂。\nA ['Anger']: 你发了两天传单了，有没有意向客户啊？要到人家电话没有？",
+#         "rationale": {
+#             "stimulus": {
+#                 "textual": "B表示自己不懂装修",
+#                 "visual": None
+#             },
+#             "appraisal": "A认为B工作态度不好，不但没有为公司带来意向客户，还不想去监工装修",
+#             "response": "A感到愤怒"
+#         },
+#         "start_emo": "Neutral",
+#         "end_emo": "Anger"
+#     },
+#     {
 #         "sample_id": "anjia_sample2",
 #         "dialogue": "A ['Neutral']: 你先把衣服换了，然后去这个地址。\nA ['Neutral']: 一会儿会有装修公司的人过去，你去监工，看看有什么可以帮忙的。\nB ['Sad']: 这个活也派我干呀？\nB ['Sad']: 装修我不懂。\nA ['Anger']: 你发了两天传单了，有没有意向客户啊？要到人家电话没有？\nB ['Sad', 'Anger']: 你不就光让我发传单吗？没让我要电话呀!",
 #         "rationale": {
 #             "stimulus": {
 #                 "textual": "A对B没能积累意向客户表示不满",
-#                 "visual": "A双手环抱胸前瞪着B",
+#                 "visual": "A双手环抱胸前瞪着B"
 #             },
 #             "appraisal": "B认为A只让自己去发传单，没有让自己去获取客户电话",
-#             "response": "B感到委屈并且有点生气",
+#             "response": "B感到委屈并且有点生气"
 #         },
 #         "start_emo": "Sad",
-#         "end_emo": "Anger",
+#         "end_emo": "Anger"
 #     },
-#     # {
-#     #     "dialogue": "A [Neutral]: 你先把衣服换了，然后去这个地址。\nA [Neutral]: 一会儿会有装修公司的人过去，你去监工，看看有什么可以帮忙的。\nB [Sad]: 这个活也派我干呀？\nB [Sad]: 装修我不懂。\nA [Anger]: 你发了两天传单了，有没有意向客户啊？要到人家电话没有？\nB [Sad]: 你不就光让我发传单吗？没让我要电话呀!",
-#     #     "rationale": {
-#     #         "stimulus": {
-#     #             "textual": "A对B没能积累意向客户表示不满",
-#     #             "visual": "A双手环抱胸前瞪着B",
-#     #         },
-#     #         "appraisal": "B认为A只让自己去发传单，没有让自己去获取客户电话",
-#     #         "response": "B感到委屈并且有点生气",
-#     #     },
-#     # },
-#     # {
-#     #     "dialogue": "A [Neutral]: 其实，我还真舍不得让你去伺候媳妇。\nA [Neutral]: 有你在店里，能帮我分担不少呢，我这负担也小多了。\nA [Neutral]: 额，帮我搭把手、干活、说个话，这...\nA [Happy]: 男女搭配，干活不累嘛，呵呵。\nB [Sad]: 亲家伺候媳妇，那倒对。\nB [Sad]: 我也不是她亲妈，不知道她爱吃什么，不爱吃什么。\nB [Sad]: 要是伺候不好，她不痛快，我也不痛快。\nA [Happy]: 你这么想就对了，呵呵。\nA [Happy]: 咱们做父母的，不就是为儿女做贡献的吗，是不是？\nB [Sad]: 年底咱回去吧，回老家。\nB [Sad]: 这夏天还能凑合，冬天你那腰根本就不行。\nA [Surprise]: 我，我回老家？",
-#     #     "rationale": {
-#     #         "stimulus": {"textual": "B表示要和A年底回老家", "visual": None},
-#     #         "appraisal": "A没想到B会突然提出要回老家，这让他感到意外",
-#     #         "response": "A有点惊讶",
-#     #     },
-#     # },
+#     {
+#         "sample_id": "anjia_sample36",
+#         "dialogue": "A ['Neutral']: 其实，我还真舍不得让你去伺候媳妇。\nA ['Neutral']: 有你在店里，能帮我分担不少呢，我这负担也小多了。\nA ['Neutral']: 额，帮我搭把手、干活、说个话，这...\nA ['Happy']: 男女搭配，干活不累嘛，呵呵。\nB ['Sad']: 亲家伺候媳妇，那倒对。\nB ['Sad']: 我也不是她亲妈，不知道她爱吃什么，不爱吃什么。\nB ['Sad']: 要是伺候不好，她不痛快，我也不痛快。\nA ['Happy']: 你这么想就对了，呵呵。\nA ['Happy']: 咱们做父母的，不就是为儿女做贡献的吗，是不是？\nB ['Sad']: 年底咱回去吧，回老家。\nB ['Sad']: 这夏天还能凑合，冬天你那腰根本就不行。\nA ['Surprise']: 我，我回老家？",
+#         "rationale": {
+#             "stimulus": {
+#                 "textual": "B表示要和A年底回老家",
+#                 "visual": None
+#             },
+#             "appraisal": "A没想到B会突然提出要回老家，这让他感到意外",
+#             "response": "A有点惊讶"
+#         },
+#         "start_emo": "Happy",
+#         "end_emo": "Surprise"
+#     },
 # ]
 # # 生成最终结果
 # final_result = sample_prompt.build_prompt(sample, similary_samples)

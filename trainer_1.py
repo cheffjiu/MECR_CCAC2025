@@ -399,12 +399,28 @@ class TrainerStage1:
                 ).to(self.device)
                 
                 input_ids_for_gen = encoded_prompts.input_ids
-                attention_mask_for_gen = encoded_prompts.attention_mask
-
+                # ========================= 【关键修复开始】 =========================
+                # 原始的、只包含文本的注意力掩码
+                attention_mask_for_text = encoded_prompts.attention_mask
+                
+                # 获取GNN伪词元的数量
+                num_gnn_tokens = unwrapped_model.num_gnn_tokens # 从模型实例中获取k值
+                
+                # 为GNN伪词元创建注意力掩码 (全1)
+                gnn_attention_mask = torch.ones(
+                    (attention_mask_for_text.shape[0], num_gnn_tokens), 
+                    dtype=attention_mask_for_text.dtype, 
+                    device=attention_mask_for_text.device
+                )
+                
+                # 将GNN掩码与文本掩码拼接，创建完整的注意力掩码
+                full_attention_mask_for_gen = torch.cat(
+                    [gnn_attention_mask, attention_mask_for_text], dim=1
+                )
                 
                 generated_ids = unwrapped_model.generate(
                     input_ids=input_ids_for_gen,
-                    attention_mask=attention_mask_for_gen,
+                    attention_mask=full_attention_mask_for_gen,
                     batched_graph=batched_graph, # 将自定义参数传入
                     # 重要的生成控制参数
                     eos_token_id=self.tokenizer.eos_token_id,

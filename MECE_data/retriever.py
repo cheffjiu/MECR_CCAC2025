@@ -46,7 +46,7 @@ class FAISSRetriever(Retriever):
         return query_vec
 
     def retrieve(
-        self, query_vector: torch.FloatTensor, k: int = 1
+        self, query_vector: torch.FloatTensor, k: int = 3
     ) -> List[Dict[str, Any]]:
         # 加载FAISS索引和元数据
         idx_data, meta_data = self._load_faiss_resources()

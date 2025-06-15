@@ -188,6 +188,8 @@ class TrainerStage3:
         os.makedirs(self.output_dir, exist_ok=True)
         self.best_model_path = os.path.join(self.output_dir, "best_model.pt")
 
+        
+
     def _train_epoch(self):
         self.model.train()
         total_loss = 0
@@ -400,23 +402,20 @@ class TrainerStage3:
 
         eval_progress_bar = tqdm(
             self.eval_dataloader,
-            desc="Evaluating",
+            desc="Evaluating", # 描述可以通用一些
             disable=not self.accelerator.is_local_main_process,
         )
 
-        for batch_idx, batch_data in enumerate(eval_progress_bar): #
+        for batch_idx, batch_data in enumerate(eval_progress_bar):
             with torch.no_grad():
-                is_train_val_mode = len(batch_data) == 3
-
-                if is_train_val_mode:
-                    batched_graph, prompt_texts, label_texts_for_supervision = batch_data
-                else:
-                    batched_graph, prompt_texts = batch_data, None
+                batched_graph, prompt_texts, label_texts_for_supervision = batch_data
                 
                 batched_graph = batched_graph.to(self.device)
+                unwrapped_model = self.accelerator.unwrap_model(self.model)
 
-                # --- 1. 生成部分 (Generation) ---
-                encoded_prompts_for_gen = self.tokenizer(
+                # --- 1. 生成部分 (回归标准调用) ---
+                # 我们不再需要手动构建inputs_embeds，模型内部的forward会处理
+                encoded_prompts = self.tokenizer(
                     prompt_texts,
                     return_tensors="pt",
                     padding='longest',
@@ -424,19 +423,36 @@ class TrainerStage3:
                     max_length=1024,
                 ).to(self.device)
                 
-                input_ids_for_gen = encoded_prompts_for_gen["input_ids"]
-                attention_mask_for_gen = encoded_prompts_for_gen["attention_mask"]
-
-                unwrapped_model = self.accelerator.unwrap_model(self.model)
-                # h_change, _ = unwrapped_model.multimodal_emotion_gnn(batched_graph)
-
+                input_ids_for_gen = encoded_prompts.input_ids
+                # ========================= 【关键修复开始】 =========================
+                # 原始的、只包含文本的注意力掩码
+                attention_mask_for_text = encoded_prompts.attention_mask
+                
+                # 获取GNN伪词元的数量
+                num_gnn_tokens = unwrapped_model.num_gnn_tokens # 从模型实例中获取k值
+                
+                # 为GNN伪词元创建注意力掩码 (全1)
+                gnn_attention_mask = torch.ones(
+                    (attention_mask_for_text.shape[0], num_gnn_tokens), 
+                    dtype=attention_mask_for_text.dtype, 
+                    device=attention_mask_for_text.device
+                )
+                
+                # 将GNN掩码与文本掩码拼接，创建完整的注意力掩码
+                full_attention_mask_for_gen = torch.cat(
+                    [gnn_attention_mask, attention_mask_for_text], dim=1
+                )
+                
                 generated_ids = unwrapped_model.generate(
                     input_ids=input_ids_for_gen,
-                    attention_mask=attention_mask_for_gen,
-                    batched_graph=batched_graph,
-                    # h_change=h_change,
+                    attention_mask=full_attention_mask_for_gen,
+                    batched_graph=batched_graph, # 将自定义参数传入
+                    # 重要的生成控制参数
+                    eos_token_id=self.tokenizer.eos_token_id,
                     pad_token_id=self.tokenizer.pad_token_id, 
                     max_new_tokens=self.config.cfg_train.max_new_tokens,
+                    
+                    # 其他beam search/sampling参数
                     num_beams=self.config.cfg_train.num_beams,
                     do_sample=self.config.cfg_train.do_sample,
                     temperature=self.config.cfg_train.temperature,
@@ -445,142 +461,99 @@ class TrainerStage3:
                     repetition_penalty=self.config.cfg_train.repetition_penalty,
                 )
                 
+                # generate()返回的是完整的 "Prompt_IDs + Generated_IDs"
+                # 所以我们从输入prompt的长度之后开始切片
                 prompt_length = input_ids_for_gen.shape[1]
                 sliced_generated_ids = [gen_ids[prompt_length:].tolist() for gen_ids in generated_ids]
                 all_predictions_ids.extend(sliced_generated_ids)
 
                 # --- 2. 损失计算部分 (Loss Calculation) ---
-                if is_train_val_mode:
-                    # 应用和 _train_epoch 中完全相同的、已修正的标签屏蔽逻辑
-                    prompt_tokenized = self.tokenizer(prompt_texts, add_special_tokens=False)
-                    label_tokenized = self.tokenizer([l + self.tokenizer.eos_token for l in label_texts_for_supervision], add_special_tokens=False)
-                    prompt_lens = [len(p) for p in prompt_tokenized['input_ids']]
-                    input_ids_list = [p + l for p, l in zip(prompt_tokenized['input_ids'], label_tokenized['input_ids'])]
+                # a. 拼接ID (与训练时相同)
+                prompt_tokenized = self.tokenizer(prompt_texts, add_special_tokens=False)
+                label_tokenized = self.tokenizer([l + self.tokenizer.eos_token for l in label_texts_for_supervision], add_special_tokens=False)
+                input_ids_list = [p + l for p, l in zip(prompt_tokenized['input_ids'], label_tokenized['input_ids'])]
 
-                    padded_result = self.tokenizer.pad(
-                        {'input_ids': input_ids_list},
-                        padding='longest', max_length=1024, return_tensors='pt'
-                    ).to(self.device)
-                    
-                    full_input_ids = padded_result.input_ids
-                    full_attention_mask = padded_result.attention_mask
+                # b. Pad (与训练时相同)
+                padded_result = self.tokenizer.pad(
+                    {'input_ids': input_ids_list},
+                    padding='longest', max_length=1024, return_tensors='pt'
+                ).to(self.device)
+                full_input_ids_for_loss = padded_result.input_ids
+                full_attention_mask_for_loss = padded_result.attention_mask
 
-                    labels = full_input_ids.clone()
-                    for i in range(len(labels)):
-                        padding_len = (full_attention_mask[i] == 0).sum().item()
-                        mask_len = padding_len + prompt_lens[i]
-                        if mask_len < labels.shape[1]:
-                            labels[i, :mask_len] = -100
+                # c. 创建只屏蔽了文本Prompt的labels (与训练时相同)
+                labels_with_prompt_mask = full_input_ids_for_loss.clone()
+                prompt_lens = [len(p) for p in prompt_tokenized['input_ids']]
+                for i in range(len(labels_with_prompt_mask)):
+                    padding_len = (full_attention_mask_for_loss[i] == 0).sum().item()
+                    mask_len = padding_len + prompt_lens[i]
+                    if mask_len < labels_with_prompt_mask.shape[1]:
+                        labels_with_prompt_mask[i, :mask_len] = -100
 
-                    # ====================================================================
-                    # ==============  EVALUATION BATCH 0 DEBUGGING START ==============
-                    # ====================================================================
-                    if batch_idx == 0 and self.accelerator.is_main_process:
-                        print("\n\n========================= START OF EVAL BATCH 0 DEBUG =========================")
-                        i = 0 # 只检查第一个样本
-                        
-                        # --- 1. 原始文本与Prompt ---
-                        print("\n[EVAL-1.1] RAW PROMPT TEXT:")
-                        print(prompt_texts[i])
-                        print("\n[EVAL-1.2] RAW LABEL TEXT:")
-                        print(label_texts_for_supervision[i])
-                        print("-" * 20)
-                        
-                        # --- 2. 标签屏蔽逻辑验证 ---
-                        padding_len = (full_attention_mask[i] == 0).sum().item()
-                        prompt_len_for_loss = prompt_lens[i]
-                        mask_len = padding_len + prompt_len_for_loss
-                        print(f"\n[EVAL-2.1] Calculated lengths for sample {i}: padding_len={padding_len}, prompt_len_for_loss={prompt_len_for_loss}, total_mask_len={mask_len}")
-                        
-                        masked_ids = full_input_ids[i][labels[i] == -100]
-                        decoded_masked = self.tokenizer.decode(masked_ids, skip_special_tokens=False)
-                        print(f"\n[EVAL-2.2] DECODED MASKED PART (for loss):\n{decoded_masked}")
-                        
-                        unmasked_ids = full_input_ids[i][labels[i] != -100]
-                        decoded_unmasked = self.tokenizer.decode(unmasked_ids, skip_special_tokens=False)
-                        print(f"\n[EVAL-2.3] DECODED UNMASKED PART (for loss):\n{decoded_unmasked}")
-                        print("-" * 20)
-                        
-                        # --- 3. 生成过程深度调试 ---
-                        print("\n[EVAL-3.1] GENERATION PARAMETERS:")
-                        gen_params = {
-                            "max_new_tokens": self.config.cfg_train.max_new_tokens,
-                            "num_beams": self.config.cfg_train.num_beams,
-                            "do_sample": self.config.cfg_train.do_sample,
-                            "temperature": self.config.cfg_train.temperature,
-                            "top_p": self.config.cfg_train.top_p,
-                            "top_k": self.config.cfg_train.top_k,
-                            "repetition_penalty": self.config.cfg_train.repetition_penalty
-                        }
-                        print(gen_params)
-                        
-                        print("\n[EVAL-3.2] INPUT TO GENERATE (Token IDs):")
-                        print(input_ids_for_gen[i].tolist())
-                        
-                        print(f"\n[EVAL-3.3] ALL GENERATED TOKEN IDs (sliced, after prompt, len={len(sliced_generated_ids[i])}):")
-                        print(sliced_generated_ids[i]) # 这是已经切片过的，只包含新生成的部分
-                        
-                        print("\n[EVAL-3.4] DECODED GENERATED TEXT (WITHOUT skipping special tokens):")
-                        decoded_prediction_raw = self.tokenizer.decode(sliced_generated_ids[i], skip_special_tokens=False)
-                        print(repr(decoded_prediction_raw)) # 使用repr()可以清晰地看到\n等特殊字符
-                        
-                        print("\n[EVAL-3.5] DECODED GENERATED TEXT (SKIPPING special tokens, for metrics):")
-                        decoded_prediction_clean = self.tokenizer.decode(sliced_generated_ids[i], skip_special_tokens=True)
-                        print(repr(decoded_prediction_clean))
-                        print("========================= END OF EVAL BATCH 0 DEBUG =========================")
-                    # ===================================================================
-                    # ================  EVALUATION BATCH 0 DEBUGGING END ================
-                    # ===================================================================
-
-                    outputs = self.model(
-                        input_ids=full_input_ids, attention_mask=full_attention_mask,
-                        batched_graph=batched_graph, labels=labels
-                    )
-                    all_loss.append(outputs.loss.item())
-
-                    cleaned_label_texts = [txt.strip() if txt and txt.strip() else "[EMPTY]" for txt in label_texts_for_supervision]
-                    all_label_texts_for_eval.extend(cleaned_label_texts)
-
-        # --- 3. 指标聚合与计算部分 (Metrics Aggregation) ---
-        metrics = {}
-        all_predictions_gathered = self.accelerator.gather_for_metrics(all_predictions_ids)
-        
-        if all_label_texts_for_eval:
-            all_references_gathered = self.accelerator.gather_for_metrics(all_label_texts_for_eval)
-            all_loss_gathered = self.accelerator.gather_for_metrics(all_loss)
-            
-            if self.accelerator.is_main_process:
-                decoded_predictions = self.evaluator.decode_generated_tokens(all_predictions_gathered)
-                
-                # 你之前的详细打印，这里保留
-                print(f"\n--- DEBUG (Main Process): Formatted Texts for Metrics ---")
-                print(f"Sample decoded_predictions (first 5): {decoded_predictions[:5]}")
-                print(f"Sample all_references_gathered (first 5): {all_references_gathered[:5]}")
-                
-                metrics = self.evaluator.compute_metrics(
-                    predictions=decoded_predictions, references=all_references_gathered,
+                # d. 调用模型 (forward函数会自动处理GNN部分的屏蔽)
+                outputs = self.model(
+                    input_ids=full_input_ids_for_loss, 
+                    attention_mask=full_attention_mask_for_loss,
+                    batched_graph=batched_graph, 
+                    labels=labels_with_prompt_mask # 传入这个只屏蔽了prompt的label
                 )
-                avg_eval_loss = torch.tensor(all_loss_gathered).mean().item()
-                metrics["eval_loss"] = round(avg_eval_loss, 4)
+                all_loss.append(outputs.loss.item())
+
+                cleaned_label_texts = [txt.strip() if txt and txt.strip() else "[EMPTY]" for txt in label_texts_for_supervision]
+                all_label_texts_for_eval.extend(cleaned_label_texts)
+
+        # --- 3. 指标聚合与计算 (Metrics Aggregation) ---
+        metrics = {}
+        # 使用 accelerator 聚合所有GPU上的结果
+        all_predictions_gathered = self.accelerator.gather_for_metrics(all_predictions_ids)
+        all_references_gathered = self.accelerator.gather_for_metrics(all_label_texts_for_eval)
+        all_loss_gathered = self.accelerator.gather_for_metrics(all_loss)
+        
+        # 只有主进程进行解码和指标计算
+        if self.accelerator.is_main_process:
+            # 解码所有预测的token IDs
+            decoded_predictions = self.evaluator.decode_generated_tokens(all_predictions_gathered)
+            
+            # 打印一些样本以供调试
+            print(f"\n--- DEBUG (Stage 1): Formatted Texts for Metrics ---")
+            print(f"Sample decoded_predictions (first 5): {decoded_predictions[:5]}")
+            print(f"Sample all_references_gathered (first 5): {all_references_gathered[:5]}")
+            
+            # 计算生成指标 (METEOR, BERTScore等)
+            metrics = self.evaluator.compute_metrics(
+                predictions=decoded_predictions, references=all_references_gathered,
+            )
+            # 计算并添加平均验证损失
+            avg_eval_loss = torch.tensor(all_loss_gathered).mean().item()
+            metrics["eval_loss"] = round(avg_eval_loss, 4)
 
         return metrics if self.accelerator.is_main_process else {}
     def train(self):
-        # 【阶段二关键修改】: 训练循环现在是针对联合微调的
-        for epoch in range(self.config.cfg_train.stage2_epochs): # 使用阶段二的轮数
+        
+        # 开始训练循环
+        for epoch in range(self.config.cfg_train.num_train_epochs):
+            # 打印当前 Epoch 信息
             if self.accelerator.is_main_process:
-                print(f"\n--- STAGE 2: Epoch {epoch + 1}/{self.config.cfg_train.stage2_epochs} ---")
+                print(f"\nEpoch {epoch + 1}/{self.config.cfg_train.num_train_epochs}")
 
-            # 训练 (不变)
+            # --- 1. 训练一个 Epoch ---
             train_loss = self._train_epoch()
             if self.accelerator.is_main_process:
                 print(f"训练损失: {train_loss:.4f}")
 
-            # 验证 (不变)
-            self.accelerator.wait_for_everyone()
-            eval_metrics = self._evaluate()
+            # --- 2. 验证和早停判断 ---
+            current_epoch_num = epoch + 1
+            
+            # 根据配置决定是否进行验证
+            if current_epoch_num >= self.config.cfg_train.start_eval_epoch:
+                
+                # --- 2.1. 执行评估 ---
+                # 等待所有进程完成训练步骤
+                self.accelerator.wait_for_everyone()
+                eval_metrics = self._evaluate()
 
-            # 保存模型和早停判断 (不变，因为它是基于 'score_sum' 的，这正是阶段二的目标)
-            if self.accelerator.is_main_process:
+                # --- 2.2. 主进程处理结果、保存模型和早停判断 ---
+                if self.accelerator.is_main_process:
                     print(f"验证指标: {eval_metrics}")
 
                     # 获取当前epoch的评估分数
