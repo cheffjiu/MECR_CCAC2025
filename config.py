@@ -22,12 +22,12 @@ class config_model:
     gnn_num_heads: int = 4  # GNN多头注意力头数
     gnn_dropout: float = 0.1  # 丢弃率
     # ===LLM注入模块参数配置====#
-    injection_in_dim: int = 1024  # GNN输出维度
-    injection_out_dim: int = 1024  # LLM模型输出维度
+    injection_in_dim: int = 2048  # GNN输出维度
+    injection_out_dim: int = 2048 # LLM模型输出维度
     injection_num_gnn_tokens: int = 4  # 生成的伪词元数量
     # ===LLM参数配置====#
-    llm_name: str = "Qwen/Qwen3-0.6B"  # 模型名称或路径
-    llm_tokenizer_name: str = "Qwen/Qwen3-0.6B"
+    llm_name: str = "Qwen/Qwen2.5-3B-Instruct"  # 模型名称或路径
+    llm_tokenizer_name: str = "Qwen/Qwen2.5-3B-Instruct"
 
 
 @dataclass
@@ -49,7 +49,7 @@ class config_dataset_dataloader:
     )
     feature_root_val: str = os.path.join(project_root, "data/feature/val")
     # ===配置dataloader参数===#
-    batch_size: int = 1 # 批大小
+    batch_size: int = 2 # 批大小
     num_workers: int = 4  # 工作进程数
 
 

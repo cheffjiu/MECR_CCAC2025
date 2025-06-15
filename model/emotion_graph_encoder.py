@@ -104,6 +104,8 @@ class EmotionGraphEncoder(nn.Module):
             nn.GELU(),
             nn.LayerNorm(512), # LayerNorm for general features, not graph specific
             nn.Linear(512, 1024),
+            nn.GELU(),
+            nn.Linear(1024, 2048),
         )
 
     def forward(self, data):
