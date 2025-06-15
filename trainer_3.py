@@ -53,19 +53,19 @@ class TrainerStage3:
         )
 
         # 【阶段二关键修改】: 加载第一阶段训练好的权重
-        unwrapped_model_for_loading = self.model # 在应用PEFT之前加载
-        stage1_gnn_path = os.path.join(self.config.cfg_train.model_save_path, "stage1_gnn.pt")
-        stage1_injection_path = os.path.join(self.config.cfg_train.model_save_path, "stage1_injection.pt")
+        # unwrapped_model_for_loading = self.model # 在应用PEFT之前加载
+        # stage1_gnn_path = os.path.join(self.config.cfg_train.model_save_path, "stage1_gnn.pt")
+        # stage1_injection_path = os.path.join(self.config.cfg_train.model_save_path, "stage1_injection.pt")
         
-        print("\n--- [STAGE 2] Loading pre-trained weights from Stage 1 ---")
-        try:
-            unwrapped_model_for_loading.multimodal_emotion_gnn.load_state_dict(torch.load(stage1_gnn_path, map_location='cpu'))
-            unwrapped_model_for_loading.injection_module.load_state_dict(torch.load(stage1_injection_path, map_location='cpu'))
-            print("Successfully loaded weights for GNN and InjectionModule.")
-        except FileNotFoundError:
-            print(f"警告：未找到阶段一的权重文件。将从随机初始化开始阶段二训练。请确保路径正确：")
-            print(f" - GNN path: {stage1_gnn_path}")
-            print(f" - Injection path: {stage1_injection_path}")
+        # print("\n--- [STAGE 2] Loading pre-trained weights from Stage 1 ---")
+        # try:
+        #     unwrapped_model_for_loading.multimodal_emotion_gnn.load_state_dict(torch.load(stage1_gnn_path, map_location='cpu'))
+        #     unwrapped_model_for_loading.injection_module.load_state_dict(torch.load(stage1_injection_path, map_location='cpu'))
+        #     print("Successfully loaded weights for GNN and InjectionModule.")
+        # except FileNotFoundError:
+        #     print(f"警告：未找到阶段一的权重文件。将从随机初始化开始阶段二训练。请确保路径正确：")
+        #     print(f" - GNN path: {stage1_gnn_path}")
+        #     print(f" - Injection path: {stage1_injection_path}")
             
         # --- LoRA 配置和应用 (逻辑保持不变) ---
         lora_config = LoraConfig(

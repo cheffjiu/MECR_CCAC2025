@@ -14,6 +14,6 @@ if __name__ == "__main__":
         cfg_train,
         cfg_lora,
     )
-    trainer = TrainerStage1(cfg)
-    # trainer=TrainerStage3(cfg)
+    # trainer = TrainerStage1(cfg)
+    trainer=TrainerStage3(cfg)
     trainer.train()

@@ -31,7 +31,7 @@ class InjectionModule(nn.Module):
         )
         # 创建一个可训练的标量参数，作为门控。
         # 将其初始化为一个非常小的正数，这是确保训练初期稳定性的关键。
-        self.gate = nn.Parameter(torch.tensor([1e-4])) 
+        self.layer_norm = nn.LayerNorm(d_model)
         # 您可以尝试 1e-3, 1e-4, 甚至 0.01，但 1e-4 是一个非常安全的选择。
         # ================================================================
         
@@ -71,5 +71,6 @@ class InjectionModule(nn.Module):
         # 从projector的输出推断d_model，确保与reshape一致
         d_model = projected_feats.shape[1] // self.num_gnn_tokens
         gnn_embeds = projected_feats.view(batch_size, self.num_gnn_tokens, d_model)
-        return gnn_embeds * self.gate
+        norm_gnn_embeds = self.layer_norm(gnn_embeds)
+        return norm_gnn_embeds
        
