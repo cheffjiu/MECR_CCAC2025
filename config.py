@@ -50,7 +50,7 @@ class config_dataset_dataloader:
     feature_root_val: str = os.path.join(project_root, "data/feature/val")
     # ===配置dataloader参数===#
     batch_size: int = 1 # 批大小
-    num_workers: int = 1 # 工作进程数
+    num_workers: int = 4  # 工作进程数
 
 
 @dataclass
